@@ -1,0 +1,51 @@
+
+FROM php:8.3-apache-bookworm
+
+RUN apt-get update && apt-get install -y \
+    libaio1 \
+    libnsl2 \
+    unzip \
+    curl \
+    libzip-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /opt/oracle
+
+RUN curl -fSL \
+    https://download.oracle.com/otn_software/linux/instantclient/2326400/instantclient-basiclite-linux.x64-23.26.4.0.0.zip \
+    -o basiclite.zip \
+    && curl -fSL \
+    https://download.oracle.com/otn_software/linux/instantclient/2326400/instantclient-sdk-linux.x64-23.26.4.0.0.zip \
+    -o sdk.zip \
+    && unzip -q basiclite.zip \
+    && unzip -q sdk.zip \
+    && rm basiclite.zip sdk.zip
+
+ENV LD_LIBRARY_PATH=/opt/oracle/instantclient_23_26
+
+RUN echo "/opt/oracle/instantclient_23_26" \
+    > /etc/ld.so.conf.d/oracle.conf \
+    && ldconfig
+
+RUN printf 'instantclient,/opt/oracle/instantclient_23_26\n' \
+    | pecl install oci8-3.4.1 \
+    && docker-php-ext-enable oci8
+
+RUN sed -i 's/Listen 80/Listen 10000/' \
+    /etc/apache2/ports.conf \
+    && sed -i 's/:80>/:10000>/' \
+    /etc/apache2/sites-available/000-default.conf
+
+WORKDIR /var/www/html
+COPY . /var/www/html/
+
+RUN mkdir -p /var/automax_private \
+    && cp /var/www/html/docker/conexao.php /var/automax_private/conexao.php \
+    && rm -rf /var/www/html/docker \
+    && chown -R www-data:www-data /var/automax_private
+
+RUN chown -R www-data:www-data /var/www/html
+
+EXPOSE 10000
+
+CMD ["apache2-foreground"]

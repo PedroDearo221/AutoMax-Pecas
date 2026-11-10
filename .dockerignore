@@ -1,0 +1,32 @@
+
+# Git
+.git
+.gitignore
+
+# Credenciais locais
+.env
+.env.*
+!.env.example
+config.local.php
+automax_private/
+
+# Backups
+backups/
+*_backup.php
+*.bak
+
+# Arquivos temporários
+*.log
+*.tmp
+
+# Dependências locais
+node_modules/
+vendor/
+
+# Editor
+.vscode/
+.idea/
+
+# Documentação
+README.md
+database/
