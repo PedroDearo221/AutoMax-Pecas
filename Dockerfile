@@ -20,10 +20,10 @@ RUN curl -fSL --retry 3 --retry-delay 5 \
     https://download.oracle.com/otn_software/linux/instantclient/2326400/instantclient-sdk-linux.x64-23.26.4.0.0.zip \
     -o sdk.zip
 
-RUN unzip -t basiclite.zip \
-    && unzip -t sdk.zip \
-    && unzip -q basiclite.zip \
-    && unzip -q sdk.zip \
+RUN unzip -tq basiclite.zip \
+    && unzip -tq sdk.zip \
+    && unzip -oq basiclite.zip \
+    && unzip -oq sdk.zip \
     && rm basiclite.zip sdk.zip
 
 ENV LD_LIBRARY_PATH=/opt/oracle/instantclient_23_26
