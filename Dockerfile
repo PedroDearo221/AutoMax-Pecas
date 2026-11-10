@@ -12,12 +12,16 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /opt/oracle
 
-RUN curl -fSL \
+RUN curl -fSL --retry 3 --retry-delay 5 \
     https://download.oracle.com/otn_software/linux/instantclient/2326400/instantclient-basiclite-linux.x64-23.26.4.0.0.zip \
-    -o basiclite.zip \
-    && curl -fSL \
+    -o basiclite.zip
+
+RUN curl -fSL --retry 3 --retry-delay 5 \
     https://download.oracle.com/otn_software/linux/instantclient/2326400/instantclient-sdk-linux.x64-23.26.4.0.0.zip \
-    -o sdk.zip \
+    -o sdk.zip
+
+RUN unzip -t basiclite.zip \
+    && unzip -t sdk.zip \
     && unzip -q basiclite.zip \
     && unzip -q sdk.zip \
     && rm basiclite.zip sdk.zip
