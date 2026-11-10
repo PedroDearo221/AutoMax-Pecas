@@ -7,6 +7,7 @@ RUN apt-get update && apt-get install -y \
     unzip \
     curl \
     libzip-dev \
+    apache2-utils \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt/oracle
@@ -37,6 +38,7 @@ RUN sed -i 's/Listen 80/Listen 10000/' \
     /etc/apache2/sites-available/000-default.conf
 
 WORKDIR /var/www/html
+
 COPY . /var/www/html/
 
 RUN mkdir -p /var/automax_private \
@@ -46,6 +48,23 @@ RUN mkdir -p /var/automax_private \
 
 RUN chown -R www-data:www-data /var/www/html
 
+RUN a2enmod auth_basic authn_file
+
+RUN printf '%s\n' \
+    '<Directory /var/www/html>' \
+    '    AuthType Basic' \
+    '    AuthName "AutoMax-Pecas - Acesso Restrito"' \
+    '    AuthUserFile /etc/apache2/.htpasswd' \
+    '    Require valid-user' \
+    '</Directory>' \
+    > /etc/apache2/conf-available/automax-auth.conf \
+    && a2enconf automax-auth
+
+COPY docker/start.sh /usr/local/bin/automax-start.sh
+
+RUN sed -i 's/\r$//' /usr/local/bin/automax-start.sh \
+    && chmod +x /usr/local/bin/automax-start.sh
+
 EXPOSE 10000
 
-CMD ["apache2-foreground"]
+CMD ["/usr/local/bin/automax-start.sh"]
