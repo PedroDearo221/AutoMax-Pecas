@@ -1,16 +1,94 @@
-```html
-<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Novo orçamento | AutoPeças</title>
-    <link rel="stylesheet" href="css/estilo.css">
+<?php
+declare(strict_types=1);
+require_once __DIR__ . '/automax.php';
+axRequireLogin();
+$erro=''; $clientes=[]; $veiculos=[]; $produtos=[]; $existente=null; $itensExistentes=[];
+$editarId=filter_var($_GET['editar'] ?? $_POST['editar_id'] ?? null,FILTER_VALIDATE_INT,['options'=>['min_range'=>1]]);
+$linhas=max(1,min(10,(int)($_GET['linhas'] ?? 3)));
+$dados=['cliente'=>'','veiculo'=>'','data'=>date('Y-m-d'),'validade'=>date('Y-m-d',strtotime('+30 days')),'observacao'=>''];
+$conn=null;
+try {
+    $conn=axConn();
+    $clientes=axQuery($conn,'SELECT ID_CLIENTE,NOME,CPF FROM CLIENTE ORDER BY NOME');
+    $veiculos=axQuery($conn,'SELECT V.ID_VEICULO,V.ID_CLIENTE,V.PLACA,V.MARCA,V.MODELO,C.NOME AS CLIENTE FROM VEICULO V JOIN CLIENTE C ON C.ID_CLIENTE=V.ID_CLIENTE ORDER BY C.NOME,V.MODELO');
+    $produtos=axQuery($conn,'SELECT ID_PRODUTO,CODIGO,NOME,PRECO FROM PRODUTO ORDER BY NOME');
+    if ($editarId) {
+        $row=axQuery($conn,'SELECT ID_ORCAMENTO,ID_CLIENTE,ID_VEICULO,ID_USUARIO,DATA_ORCAMENTO,VALIDADE,OBSERVACAO,STATUS,TO_CHAR(DATA_ORCAMENTO,\'YYYY-MM-DD\') AS DATA_FORM,TO_CHAR(VALIDADE,\'YYYY-MM-DD\') AS VALIDADE_FORM FROM ORCAMENTO WHERE ID_ORCAMENTO=:id',['id'=>$editarId]);
+        if (!$row) throw new RuntimeException('Orçamento para edição não encontrado.');
+        $existente=$row[0];
+        $dados=['cliente'=>(string)$existente['ID_CLIENTE'],'veiculo'=>(string)$existente['ID_VEICULO'],'data'=>(string)$existente['DATA_FORM'],'validade'=>(string)($existente['VALIDADE_FORM'] ?? ''),'observacao'=>(string)($existente['OBSERVACAO'] ?? '')];
+        $itensExistentes=axQuery($conn,'SELECT ID_ITEM,ID_PRODUTO,QUANTIDADE,VALOR_UNITARIO FROM ITEM_ORCAMENTO WHERE ID_ORCAMENTO=:id ORDER BY ID_ITEM',['id'=>$editarId]);
+        $linhas=max($linhas,count($itensExistentes));
+    }
+    if (($_SERVER['REQUEST_METHOD'] ?? 'GET')==='POST') {
+        axRequireLogin(true);
+        axCheckCsrf();
+        $idCliente=filter_var($_POST['cliente'] ?? null,FILTER_VALIDATE_INT,['options'=>['min_range'=>1]]);
+        $idVeiculo=filter_var($_POST['veiculo'] ?? null,FILTER_VALIDATE_INT,['options'=>['min_range'=>1]]);
+        $data=(string)($_POST['data'] ?? '');
+        $validade=(string)($_POST['validade'] ?? '');
+        $obs=trim((string)($_POST['observacao'] ?? ''));
+        if (!$idCliente || !$idVeiculo) throw new RuntimeException('Selecione cliente e veículo.');
+        if (!axDate($data) || !axDate($validade) || $validade<$data) throw new RuntimeException('Informe datas válidas (validade não pode anteceder a data do orçamento).');
+        if (mb_strlen($obs)>500) throw new RuntimeException('Observações ultrapassam 500 caracteres.');
+        $liga=axQuery($conn,'SELECT COUNT(*) AS TOTAL FROM VEICULO WHERE ID_VEICULO=:veiculo AND ID_CLIENTE=:cliente',['veiculo'=>$idVeiculo,'cliente'=>$idCliente]);
+        if ((int)$liga[0]['TOTAL']!==1) throw new RuntimeException('O veículo não pertence ao cliente selecionado.');
+        $pids=(array)($_POST['produto'] ?? []);
+        $quantidades=(array)($_POST['quantidade'] ?? []);
+        $idsItens=(array)($_POST['item_id'] ?? []);
+        if (count($pids)>10 || count($quantidades)>10 || count($idsItens)>10) throw new RuntimeException('Limite de 10 linhas por envio.');
+        $prodMap=[]; foreach ($produtos as $p) $prodMap[(int)$p['ID_PRODUTO']]=$p;
+        $anteriores=[]; foreach ($itensExistentes as $i) $anteriores[(int)$i['ID_ITEM']]=$i;
+        $itens=[];
+        for ($i=0;$i<count($pids);$i++) {
+            $pid=filter_var($pids[$i],FILTER_VALIDATE_INT,['options'=>['min_range'=>1]]);
+            $q=filter_var($quantidades[$i] ?? null,FILTER_VALIDATE_INT,['options'=>['min_range'=>1]]);
+            $itemId=filter_var($idsItens[$i] ?? 0,FILTER_VALIDATE_INT);
+            if (($pids[$i] ?? '')==='' && ($quantidades[$i] ?? '')==='') continue;
+            if (!$pid || !$q || $q>9999999999 || !isset($prodMap[$pid])) throw new RuntimeException('Confira o produto e a quantidade na linha '.($i+1).'.');
+            // O preco original e preservado na edicao do mesmo item/produto.
+            $preco=isset($anteriores[$itemId]) && (int)$anteriores[$itemId]['ID_PRODUTO']===$pid ? (string)$anteriores[$itemId]['VALOR_UNITARIO'] : (string)$prodMap[$pid]['PRECO'];
+            if ((float)$preco<0 || (float)$preco>99999999) throw new RuntimeException('Preço de produto inválido.');
+            $itens[]=['produto'=>$pid,'quantidade'=>$q,'preco'=>$preco];
+        }
+        if (!$itens) throw new RuntimeException('Inclua pelo menos um produto e quantidade.');
+        $usuario=axUser();
+        $usuarioAtual=axQuery($conn,"SELECT ID_USUARIO FROM USUARIO WHERE ID_USUARIO=:id AND ATIVO='S'",['id'=>(int)$usuario['id']]);
+        if (!$usuarioAtual) throw new RuntimeException('Usuário inativo. Entre novamente.');
+        // Nenhuma operacao de escrita ocorre antes de todas as validacoes acima.
+        if (!$editarId) {
+            $sequencia=axQuery($conn,'SELECT SEQ_AUTOMAX_ORCAMENTO.NEXTVAL AS ID FROM DUAL');
+            $editarId=(int)$sequencia[0]['ID'];
+            axRun($conn,"INSERT INTO ORCAMENTO (ID_ORCAMENTO,ID_CLIENTE,ID_VEICULO,ID_USUARIO,DATA_ORCAMENTO,VALIDADE,STATUS,VALOR_TOTAL,OBSERVACAO)
+                VALUES (:id,:cliente,:veiculo,:usuario,TO_DATE(:data,'YYYY-MM-DD'),TO_DATE(:validade,'YYYY-MM-DD'),'PENDENTE',0,:obs)",
+                ['id'=>$editarId,'cliente'=>$idCliente,'veiculo'=>$idVeiculo,'usuario'=>(int)$usuario['id'],'data'=>$data,'validade'=>$validade,'obs'=>$obs]);
+        } else {
+            axRun($conn,"UPDATE ORCAMENTO SET ID_CLIENTE=:cliente,ID_VEICULO=:veiculo,DATA_ORCAMENTO=TO_DATE(:data,'YYYY-MM-DD'),VALIDADE=TO_DATE(:validade,'YYYY-MM-DD'),OBSERVACAO=:obs WHERE ID_ORCAMENTO=:id",
+                ['cliente'=>$idCliente,'veiculo'=>$idVeiculo,'data'=>$data,'validade'=>$validade,'obs'=>$obs,'id'=>$editarId]);
+            axRun($conn,'DELETE FROM ITEM_ORCAMENTO WHERE ID_ORCAMENTO=:id',['id'=>$editarId]);
+        }
+        foreach ($itens as $i) {
+            axRun($conn,"INSERT INTO ITEM_ORCAMENTO (ID_ITEM,ID_ORCAMENTO,ID_PRODUTO,QUANTIDADE,VALOR_UNITARIO,SUBTOTAL)
+                VALUES (SEQ_AUTOMAX_ITEM_ORCAMENTO.NEXTVAL,:orc,:produto,:q,:preco,0)",
+                ['orc'=>$editarId,'produto'=>$i['produto'],'q'=>$i['quantidade'],'preco'=>$i['preco']]);
+        }
+        if (!oci_commit($conn)) throw new RuntimeException('Não foi possível confirmar o orçamento.');
+        header('Location: orcamentos.php?ok=1',true,303);
+        exit;
+    }
+} catch (Throwable $e) {
+    if ($conn) oci_rollback($conn);
+    error_log('AutoMax salvar orcamento: '.$e->getMessage());
+    $erro=$e instanceof RuntimeException?$e->getMessage():'Erro ao consultar ou salvar orçamento.';
+} finally { if ($conn) oci_close($conn); }
+if (($_SERVER['REQUEST_METHOD'] ?? 'GET')==='POST') {
+    foreach (['cliente','veiculo','data','validade','observacao'] as $k) if (isset($_POST[$k])) $dados[$k]=(string)$_POST[$k];
+    $linhas=max($linhas, min(10,count((array)($_POST['produto'] ?? []))));
+}
+?>
+<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Novo orçamento | AutoMax-Peças</title>
+<link rel="stylesheet" href="css/estilo.css"><style>
 
-    <script src="https://unpkg.com/lucide@latest"></script>
-
-    <style>
-    
         .menu a {
             display: flex;
             align-items: center;
@@ -36,7 +114,7 @@
             stroke-width: 1.8;
         }
 
-    
+
         .botao {
             display: inline-flex;
             align-items: center;
@@ -101,7 +179,7 @@
             line-height: 1.3;
         }
 
-        
+
         .totais {
             margin-left: auto;
             width: min(100%, 360px);
@@ -130,7 +208,7 @@
             font-weight: 700;
         }
 
-        
+
         .aviso {
             margin-bottom: 18px;
             padding: 12px 14px;
@@ -201,712 +279,53 @@
                 width: 100%;
             }
         }
-    </style>
-</head>
 
-<body>
-
-<aside class="sidebar">
-    <div class="logo">
-        <div class="logo-icon">A</div>
-        <div>
-            <h2>Auto<span>Peças</span></h2>
-            <small>Sistema de Gestão</small>
-        </div>
-    </div>
-
-    <p class="menu-titulo">MENU PRINCIPAL</p>
-
-    <nav class="menu">
-        <a href="index.php">
-            <i data-lucide="layout-dashboard"></i>
-            Dashboard
-        </a>
-
-        <a href="clientes.php">
-            <i data-lucide="users-round"></i>
-            Clientes
-        </a>
-
-        <a href="veiculos.php">
-            <i data-lucide="car-front"></i>
-            Veículos
-        </a>
-
-        <a href="produtos.php">
-            <i data-lucide="package"></i>
-            Produtos
-        </a>
-
-        <a href="estoque.php">
-            <i data-lucide="boxes"></i>
-            Estoque
-        </a>
-
-        <a href="orcamentos.php" class="ativo">
-            <i data-lucide="file-text"></i>
-            Orçamentos
-        </a>
-
-        <a href="relatorios.php">
-            <i data-lucide="chart-no-axes-column"></i>
-            Relatórios
-        </a>
-    </nav>
-
-    <div class="sidebar-rodape">
-        <span class="status-bolinha"></span>
-        <div>
-            <p>Sistema operacional</p>
-            <small>AutoPeças Gestão</small>
-        </div>
-    </div>
-</aside>
-
-<main class="conteudo">
-
-    <section class="painel-controle">
-        <div class="painel-texto">
-            <span class="painel-etiqueta">GESTÃO COMERCIAL</span>
-            <h2 id="tituloPagina">Novo orçamento</h2>
-            <p>Cadastre o cliente, adicione produtos e confira o valor total.</p>
-        </div>
-    </section>
-
-    <div id="mensagem" class="mensagem" role="status"></div>
-
-    <div class="aviso">
-        <i data-lucide="info"></i>
-        <span>
-            Os clientes e produtos são carregados do armazenamento local quando
-            existir uma lista compatível. Se ainda não houver cadastros disponíveis,
-            você poderá preencher o nome do cliente e inserir os produtos manualmente.
-        </span>
-    </div>
-
-    <form id="formOrcamento">
-
-        <section class="secao">
-            <div class="secao-cabecalho">
-                <div>
-                    <h2>Dados do orçamento</h2>
-                    <p>Informe os dados principais da proposta.</p>
-                </div>
-            </div>
-
-            <div class="form-grid">
-
-                <div class="campo">
-                    <label for="numero">Número do orçamento</label>
-                    <input id="numero" name="numero" readonly>
-                </div>
-
-                <div class="campo">
-                    <label for="cliente">Cliente *</label>
-                    <input
-                        id="cliente"
-                        name="cliente"
-                        list="clientesDisponiveis"
-                        placeholder="Digite ou selecione o cliente"
-                        required
-                    >
-                    <datalist id="clientesDisponiveis"></datalist>
-                </div>
-
-                <div class="campo">
-                    <label for="data">Data do orçamento *</label>
-                    <input type="date" id="data" name="data" required>
-                </div>
-
-                <div class="campo">
-                    <label for="validade">Validade até *</label>
-                    <input type="date" id="validade" name="validade" required>
-                </div>
-
-                <div class="campo campo-completo">
-                    <label for="observacoes">Observações</label>
-                    <textarea
-                        id="observacoes"
-                        name="observacoes"
-                        rows="3"
-                        placeholder="Informações adicionais sobre o orçamento"
-                    ></textarea>
-                </div>
-
-            </div>
-        </section>
-
-        <section class="secao">
-
-            <div class="secao-cabecalho">
-                <div>
-                    <h2>Produtos do orçamento</h2>
-                    <p>Adicione os produtos, as quantidades e os preços.</p>
-                </div>
-
-                <button
-                    type="button"
-                    class="botao botao-principal"
-                    id="adicionarProduto"
-                >
-                    <i data-lucide="plus"></i>
-                    Adicionar produto
-                </button>
-            </div>
-
-            <div id="itensProdutos"></div>
-
-            <div class="totais">
-                <div class="total-linha">
-                    <span>Quantidade de itens</span>
-                    <strong id="quantidadeItens">0</strong>
-                </div>
-
-                <div class="total-linha">
-                    <span>Subtotal</span>
-                    <strong id="subtotal">R$ 0,00</strong>
-                </div>
-
-                <div class="total-linha total-final">
-                    <span>Total do orçamento</span>
-                    <strong id="total">R$ 0,00</strong>
-                </div>
-            </div>
-
-            <div class="acoes-final">
-                <a href="orcamentos.php" class="botao botao-secundario">
-                    <i data-lucide="x"></i>
-                    Cancelar
-                </a>
-
-                <button type="submit" class="botao botao-principal">
-                    <i data-lucide="save"></i>
-                    Salvar orçamento
-                </button>
-            </div>
-
-        </section>
-
-    </form>
-
-    <footer class="rodape">
-        <span>AutoPeças Gestão</span>
-        <span>Cadastro de orçamento</span>
-    </footer>
-
-</main>
-
-<script>
-(() => {
-    const CHAVE_ORCAMENTOS = "autopecas_orcamentos";
-
-    const form = document.getElementById("formOrcamento");
-    const listaItens = document.getElementById("itensProdutos");
-    const mensagem = document.getElementById("mensagem");
-
-    const parametros = new URLSearchParams(window.location.search);
-    const idEdicao = parametros.get("id");
-
-    let contadorItem = 0;
-
-    function lerLista(chaves) {
-        for (const chave of chaves) {
-            try {
-                const valor = JSON.parse(localStorage.getItem(chave));
-
-                if (Array.isArray(valor) && valor.length) {
-                    return valor;
-                }
-            } catch (_) {}
-        }
-
-        return [];
-    }
-
-    function salvarLista(lista) {
-        localStorage.setItem(
-            CHAVE_ORCAMENTOS,
-            JSON.stringify(lista)
-        );
-    }
-
-    function moeda(valor) {
-        return Number(valor || 0).toLocaleString("pt-BR", {
-            style: "currency",
-            currency: "BRL"
-        });
-    }
-
-    function hojeISO() {
-        const agora = new Date();
-
-        const local = new Date(
-            agora.getTime() - agora.getTimezoneOffset() * 60000
-        );
-
-        return local.toISOString().slice(0, 10);
-    }
-
-    function exibirMensagem(texto, erro = false) {
-        mensagem.textContent = texto;
-        mensagem.classList.toggle("erro", erro);
-        mensagem.style.display = "block";
-
-        mensagem.scrollIntoView({
-            behavior: "smooth",
-            block: "nearest"
-        });
-    }
-
-    function escapar(texto) {
-        return String(texto ?? "").replace(/[&<>"']/g, c => ({
-            "&": "&amp;",
-            "<": "&lt;",
-            ">": "&gt;",
-            '"': "&quot;",
-            "'": "&#39;"
-        })[c]);
-    }
-
-    const clientes = lerLista([
-        "autopecas_clientes",
-        "clientes",
-        "listaClientes"
-    ]);
-
-    const produtos = lerLista([
-        "autopecas_produtos",
-        "produtos",
-        "listaProdutos"
-    ]);
-
-    const nomesClientes = clientes.map(c =>
-        typeof c === "string"
-            ? c
-            : (
-                c.nome ||
-                c.cliente ||
-                c.razaoSocial ||
-                c.name ||
-                ""
-            )
-    ).filter(Boolean);
-
-    document.getElementById("clientesDisponiveis").innerHTML =
-        [...new Set(nomesClientes)].map(nome =>
-            `<option value="${escapar(nome)}"></option>`
-        ).join("");
-
-    function normalizarProduto(p, indice) {
-        const nome = typeof p === "string"
-            ? p
-            : (
-                p.nome ||
-                p.produto ||
-                p.descricao ||
-                p.nomeProduto ||
-                p.name ||
-                `Produto ${indice + 1}`
-            );
-
-        const preco = typeof p === "object"
-            ? Number(
-                p.preco ??
-                p.valor ??
-                p.precoVenda ??
-                p.valorUnitario ??
-                p.price ??
-                0
-            )
-            : 0;
-
-        return { nome, preco };
-    }
-
-    const produtosDisponiveis = produtos.map(normalizarProduto);
-
-    function adicionarLinha(dados = {}) {
-        contadorItem++;
-
-        const id = contadorItem;
-        const linha = document.createElement("div");
-
-        linha.className = "linha-produto";
-        linha.dataset.itemId = id;
-
-        linha.innerHTML = `
-            <div class="campo">
-                <label for="produto-${id}">Produto *</label>
-
-                <input
-                    id="produto-${id}"
-                    class="nome-produto"
-                    list="produtos-${id}"
-                    placeholder="Nome do produto"
-                    value="${escapar(dados.produto || "")}"
-                    required
-                >
-
-                <datalist id="produtos-${id}">
-                    ${produtosDisponiveis.map(p =>
-                        `<option value="${escapar(p.nome)}"></option>`
-                    ).join("")}
-                </datalist>
-            </div>
-
-            <div class="campo">
-                <label for="quantidade-${id}">Quantidade *</label>
-
-                <input
-                    id="quantidade-${id}"
-                    class="quantidade"
-                    type="number"
-                    min="1"
-                    step="1"
-                    value="${
-                        Number(dados.quantidade) > 0
-                            ? Number(dados.quantidade)
-                            : 1
-                    }"
-                    required
-                >
-            </div>
-
-            <div class="campo">
-                <label for="preco-${id}">Preço unitário (R$) *</label>
-
-                <input
-                    id="preco-${id}"
-                    class="preco"
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value="${Number(dados.preco ?? 0).toFixed(2)}"
-                    required
-                >
-            </div>
-
-            <div class="campo">
-                <label>Subtotal</label>
-
-                <input
-                    class="subtotal-item"
-                    value="${moeda(0)}"
-                    readonly
-                >
-            </div>
-
-            <button
-                type="button"
-                class="remover-item"
-                title="Remover produto"
-                aria-label="Remover produto"
-            >
-                <i data-lucide="trash-2"></i>
-            </button>
-        `;
-
-        listaItens.appendChild(linha);
-
-        lucide.createIcons({
-            root: linha
-        });
-
-        const nomeInput = linha.querySelector(".nome-produto");
-
-        nomeInput.addEventListener("change", () => {
-            const produto = produtosDisponiveis.find(p =>
-                p.nome.toLowerCase() ===
-                nomeInput.value.trim().toLowerCase()
-            );
-
-            if (produto && !linha.dataset.precoAlterado) {
-                linha.querySelector(".preco").value =
-                    Number(produto.preco || 0).toFixed(2);
-            }
-
-            calcularTotais();
-        });
-
-        linha.querySelector(".preco").addEventListener("input", () => {
-            linha.dataset.precoAlterado = "1";
-            calcularTotais();
-        });
-
-        linha.querySelector(".quantidade").addEventListener(
-            "input",
-            calcularTotais
-        );
-
-        linha.querySelector(".remover-item").addEventListener(
-            "click",
-            () => {
-                linha.remove();
-                calcularTotais();
-            }
-        );
-
-        calcularTotais();
-    }
-
-    function calcularTotais() {
-        let quantidadeItens = 0;
-        let subtotal = 0;
-
-        listaItens.querySelectorAll(".linha-produto").forEach(linha => {
-            const quantidade = Math.max(
-                0,
-                Number(linha.querySelector(".quantidade").value) || 0
-            );
-
-            const preco = Math.max(
-                0,
-                Number(linha.querySelector(".preco").value) || 0
-            );
-
-            const totalItem = quantidade * preco;
-
-            linha.querySelector(".subtotal-item").value =
-                moeda(totalItem);
-
-            quantidadeItens += quantidade;
-            subtotal += totalItem;
-        });
-
-        document.getElementById("quantidadeItens").textContent =
-            quantidadeItens;
-
-        document.getElementById("subtotal").textContent =
-            moeda(subtotal);
-
-        document.getElementById("total").textContent =
-            moeda(subtotal);
-
-        return { quantidadeItens, subtotal };
-    }
-
-    document.getElementById("adicionarProduto").addEventListener(
-        "click",
-        () => adicionarLinha()
-    );
-
-    document.getElementById("data").value = hojeISO();
-
-    const validadePadrao = new Date();
-    validadePadrao.setDate(validadePadrao.getDate() + 7);
-
-    const validadeLocal = new Date(
-        validadePadrao.getTime() -
-        validadePadrao.getTimezoneOffset() * 60000
-    );
-
-    document.getElementById("validade").value =
-        validadeLocal.toISOString().slice(0, 10);
-
-    function carregarOrcamentosSeguros() {
-        try {
-            const dados = JSON.parse(
-                localStorage.getItem(CHAVE_ORCAMENTOS)
-            );
-
-            return Array.isArray(dados) ? dados : [];
-        } catch (_) {
-            return [];
-        }
-    }
-
-    let orcamentos = carregarOrcamentosSeguros();
-    let original = null;
-
-    if (idEdicao) {
-        original = orcamentos.find(
-            o => String(o.id) === String(idEdicao)
-        );
-
-        if (original) {
-            document.getElementById("tituloPagina").textContent =
-                "Editar orçamento";
-
-            document.getElementById("numero").value =
-                original.numero || "";
-
-            document.getElementById("cliente").value =
-                original.cliente || "";
-
-            document.getElementById("data").value =
-                original.data || hojeISO();
-
-            document.getElementById("validade").value =
-                original.validade || "";
-
-            document.getElementById("observacoes").value =
-                original.observacoes || "";
-
-            (original.itens || []).forEach(adicionarLinha);
-        } else {
-            exibirMensagem(
-                "O orçamento solicitado não foi encontrado. Você pode criar um novo.",
-                true
-            );
-        }
-    }
-
-    if (!original) {
-        const maiorNumero = orcamentos.reduce((maior, o) => {
-            const n = Number(
-                String(o.numero || "").replace(/\D/g, "")
-            );
-
-            return Math.max(maior, n || 0);
-        }, 0);
-
-        document.getElementById("numero").value =
-            `ORC-${String(maiorNumero + 1).padStart(4, "0")}`;
-    }
-
-    if (!listaItens.children.length) {
-        adicionarLinha();
-    }
-
-    form.addEventListener("submit", event => {
-        event.preventDefault();
-
-        const cliente = document.getElementById("cliente").value.trim();
-        const data = document.getElementById("data").value;
-        const validade = document.getElementById("validade").value;
-
-        const linhas = [
-            ...listaItens.querySelectorAll(".linha-produto")
-        ];
-
-        if (!cliente) {
-            exibirMensagem("Informe o nome do cliente.", true);
-            document.getElementById("cliente").focus();
-            return;
-        }
-
-        if (!linhas.length) {
-            exibirMensagem(
-                "Adicione pelo menos um produto ao orçamento.",
-                true
-            );
-            return;
-        }
-
-        const itens = [];
-
-        for (const linha of linhas) {
-            const produto = linha
-                .querySelector(".nome-produto")
-                .value.trim();
-
-            const quantidade = Number(
-                linha.querySelector(".quantidade").value
-            );
-
-            const preco = Number(
-                linha.querySelector(".preco").value
-            );
-
-            if (
-                !produto ||
-                !Number.isFinite(quantidade) ||
-                quantidade < 1 ||
-                !Number.isInteger(quantidade) ||
-                !Number.isFinite(preco) ||
-                preco < 0
-            ) {
-                exibirMensagem(
-                    "Confira os produtos, as quantidades e os preços informados.",
-                    true
-                );
-                return;
-            }
-
-            itens.push({
-                produto,
-                quantidade,
-                preco,
-                subtotal: quantidade * preco
-            });
-        }
-
-        if (!data || !validade) {
-            exibirMensagem(
-                "Informe a data e a validade do orçamento.",
-                true
-            );
-            return;
-        }
-
-        if (validade < data) {
-            exibirMensagem(
-                "A validade do orçamento não pode ser anterior à data do orçamento.",
-                true
-            );
-            return;
-        }
-
-        const total = itens.reduce(
-            (soma, item) => soma + item.subtotal,
-            0
-        );
-
-        const orcamento = {
-            id: original
-                ? original.id
-                : (
-                    typeof crypto !== "undefined" &&
-                    typeof crypto.randomUUID === "function"
-                        ? crypto.randomUUID()
-                        : String(Date.now())
-                ),
-
-            numero: document.getElementById("numero").value,
-            cliente,
-            data,
-            validade,
-
-            observacoes: document.getElementById("observacoes")
-                .value.trim(),
-
-            itens,
-            total,
-
-            status: original
-                ? (original.status || "Pendente")
-                : "Pendente"
-        };
-
-        try {
-            const atuais = carregarOrcamentosSeguros();
-
-            const index = atuais.findIndex(
-                o => String(o.id) === String(orcamento.id)
-            );
-
-            if (index >= 0) {
-                atuais[index] = orcamento;
-            } else {
-                atuais.push(orcamento);
-            }
-
-            salvarLista(atuais);
-
-            window.location.href = "orcamentos.php";
-
-        } catch (_) {
-            exibirMensagem(
-                "Não foi possível salvar. Verifique se o armazenamento local do navegador está habilitado.",
-                true
-            );
-        }
-    });
-
-    lucide.createIcons();
-})();
-</script>
-
-</body>
-</html>
-```
+.linha-produto {grid-template-columns:minmax(210px,2fr) 100px 155px;}
+.msg-erro {padding:14px;border-radius:8px;background:#fde7e7;color:#a52b2b;margin:18px 0;}
+.filtros-linhas {display:flex;align-items:end;gap:12px;flex-wrap:wrap;margin:10px 0 20px;}
+</style></head><body><aside class="sidebar"><div class="logo"><div class="logo-icon">A</div><div><h2>Auto<span>Peças</span></h2><small>Sistema de Gestão</small></div></div>
+<p class="menu-titulo">MENU PRINCIPAL</p><nav class="menu">
+<a href="index.php">Dashboard</a><a href="clientes.php">Clientes</a><a href="veiculos.php">Veículos</a><a href="produtos.php">Produtos</a><a href="estoque.php">Estoque</a><a href="orcamentos.php" class="ativo">Orçamentos</a><a href="relatorios.php">Relatórios</a>
+</nav><div class="sidebar-rodape"><span class="status-bolinha"></span><span>Sistema operacional</span></div></aside>
+<main class="conteudo"><section class="painel-controle"><div class="painel-texto"><span class="painel-etiqueta">GESTÃO COMERCIAL</span>
+<h2><?= $existente ? 'Editar orçamento #'.(int)$existente['ID_ORCAMENTO'] : 'Novo orçamento' ?></h2>
+<p>Os valores são calculados no Oracle a partir dos produtos selecionados.</p></div></section>
+<?php if ($erro): ?><div class="msg-erro" role="alert"><?= axH($erro) ?></div><?php endif; ?>
+<?php if (!axUser()): ?><div class="msg-erro">É necessário <a href="login.php">entrar no sistema</a> para salvar orçamentos.</div><?php endif; ?>
+<form class="filtros-linhas" method="get" action="novo-orcamento.php">
+<?php if ($editarId): ?><input type="hidden" name="editar" value="<?= (int)$editarId ?>"><?php endif; ?>
+<label for="linhas">Quantidade de linhas de produto</label><input type="number" id="linhas" name="linhas" min="1" max="10" value="<?= $linhas ?>">
+<button type="submit" class="botao botao-secundario">Aplicar quantidade</button>
+</form>
+<form method="post" action="novo-orcamento.php" id="formOrcamento">
+<input type="hidden" name="csrf" value="<?= axH(axCsrf()) ?>">
+<input type="hidden" name="editar_id" value="<?= (int)($editarId ?: 0) ?>">
+<section class="secao"><div class="secao-cabecalho"><div><h2>Informações do orçamento</h2><p>Selecione um veículo pertencente ao cliente indicado.</p></div></div>
+<div class="form-grid">
+<div class="campo"><label for="cliente">Cliente *</label><select name="cliente" id="cliente" required><option value="">Selecione o cliente</option>
+<?php foreach ($clientes as $c): ?><option value="<?= (int)$c['ID_CLIENTE'] ?>" <?= (string)$dados['cliente']===(string)$c['ID_CLIENTE']?'selected':'' ?>><?= axH($c['NOME']) ?> (CPF final <?= axH(substr((string)$c['CPF'],-2)) ?>)</option><?php endforeach; ?></select></div>
+<div class="campo"><label for="veiculo">Veículo *</label><select name="veiculo" id="veiculo" required><option value="">Selecione o veículo</option>
+<?php foreach ($veiculos as $v): ?><option value="<?= (int)$v['ID_VEICULO'] ?>" <?= (string)$dados['veiculo']===(string)$v['ID_VEICULO']?'selected':'' ?>><?= axH($v['CLIENTE'].' — '.$v['MARCA'].' '.$v['MODELO'].' — '.$v['PLACA']) ?></option><?php endforeach; ?></select></div>
+<div class="campo"><label for="data">Data *</label><input type="date" name="data" id="data" value="<?= axH($dados['data']) ?>" required></div>
+<div class="campo"><label for="validade">Validade *</label><input type="date" name="validade" id="validade" value="<?= axH($dados['validade']) ?>" required></div>
+<div class="campo campo-completo"><label for="observacao">Observações</label><textarea name="observacao" id="observacao" maxlength="500" rows="3"><?= axH($dados['observacao']) ?></textarea></div>
+</div></section>
+<section class="secao"><div class="secao-cabecalho"><div><h2>Produtos do orçamento</h2>
+<p>Preços carregados do catálogo. Ao editar, o valor histórico do item é preservado quando o produto não muda.</p></div></div>
+<?php for ($n=0;$n<$linhas;$n++): ?>
+<?php $item=$itensExistentes[$n] ?? null;
+    $selId=(string)($_POST['produto'][$n] ?? $item['ID_PRODUTO'] ?? '');
+    $qtd=(string)($_POST['quantidade'][$n] ?? $item['QUANTIDADE'] ?? '');
+    $itemId=(int)($_POST['item_id'][$n] ?? $item['ID_ITEM'] ?? 0);
+?>
+<div class="linha-produto"><div class="campo"><label for="produto<?= $n ?>">Produto <?= $n+1 ?></label>
+<select name="produto[]" id="produto<?= $n ?>"><option value="">Sem item nesta linha</option>
+<?php foreach ($produtos as $p): ?><option value="<?= (int)$p['ID_PRODUTO'] ?>" <?= $selId===(string)$p['ID_PRODUTO']?'selected':'' ?>><?= axH($p['CODIGO'].' — '.$p['NOME'].' ('.axMoney($p['PRECO']).')') ?></option><?php endforeach; ?></select></div>
+<div class="campo"><label for="qtd<?= $n ?>">Quantidade</label><input type="number" id="qtd<?= $n ?>" name="quantidade[]" min="1" max="9999999999" step="1" value="<?= axH($qtd) ?>"></div>
+<div class="campo"><label>Valor unitário</label><p class="texto-secundario">Definido pelo Oracle</p><input type="hidden" name="item_id[]" value="<?= $itemId ?>"></div></div>
+<?php endfor; ?>
+<p class="aviso">O valor total será calculado pelas triggers do Oracle após salvar. O orçamento não movimenta o estoque automaticamente.</p>
+<div class="acoes-final"><a href="orcamentos.php" class="botao botao-secundario">Cancelar</a>
+<button type="submit" class="botao botao-principal" <?= axUser()?'':'disabled' ?>>Salvar orçamento</button></div>
+</section></form>
+<footer class="rodape">AutoMax-Peças · Cadastro de orçamento</footer></main></body></html>

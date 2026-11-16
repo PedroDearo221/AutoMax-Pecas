@@ -9,7 +9,6 @@ O objetivo é facilitar o gerenciamento de uma loja de autopeças, integrando um
 ## Tecnologias utilizadas
 
 - **HTML5 e CSS3:** estrutura e estilização das páginas.
-- **JavaScript:** interações e funcionalidades da interface.
 - **PHP:** processamento das operações e integração com o banco de dados.
 - **Oracle Database (FreeSQL):** armazenamento dos dados.
 - **OCI8:** comunicação entre PHP e Oracle.

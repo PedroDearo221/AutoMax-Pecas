@@ -1,7 +1,9 @@
 <?php
 // Produtos AutoMax - dados armazenados no Oracle FreeSQL.
 declare(strict_types=1);
-session_start();
+require_once __DIR__ . '/automax.php';
+axSession();
+axRequireLogin();
 require_once dirname(__DIR__, 2) . '/automax_private/conexao.php';
 
 function h(mixed $v): string {
@@ -105,14 +107,18 @@ try {
     $erro = $e->getMessage();
 }
 
-$categorias = []; $marcas = []; $produtos = [];
+$categorias = []; $marcas = []; $produtos = []; $estoqueResumo = ['UNIDADES'=>0,'BAIXOS'=>0];
 $busca = trim((string)($_GET['busca'] ?? ''));
 try {
     if (!$conn) $conn = conexaoOracle();
     $categorias = consultar($conn, 'SELECT ID_CATEGORIA, NOME FROM CATEGORIA ORDER BY NOME');
     $marcas = consultar($conn, 'SELECT ID_MARCA, NOME FROM MARCA ORDER BY NOME');
+    $resumo = consultar($conn, "SELECT NVL(SUM(E.QUANTIDADE),0) AS UNIDADES,
+        COUNT(CASE WHEN E.QUANTIDADE IS NOT NULL AND E.QUANTIDADE <= P.ESTOQUE_MINIMO THEN 1 END) AS BAIXOS
+        FROM PRODUTO P LEFT JOIN ESTOQUE E ON E.ID_PRODUTO=P.ID_PRODUTO");
+    if ($resumo) $estoqueResumo = $resumo[0];
     $pesquisa = '%' . mb_strtoupper($busca, 'UTF-8') . '%';
-    $produtos = consultar($conn, 'SELECT P.ID_PRODUTO, P.CODIGO, P.NOME, P.DESCRICAO, P.PRECO, P.ESTOQUE_MINIMO, P.ID_CATEGORIA, P.ID_MARCA, C.NOME AS CATEGORIA, M.NOME AS MARCA FROM PRODUTO P JOIN CATEGORIA C ON C.ID_CATEGORIA=P.ID_CATEGORIA JOIN MARCA M ON M.ID_MARCA=P.ID_MARCA WHERE (:termo1 IS NULL OR UPPER(P.CODIGO) LIKE :termo2 OR UPPER(P.NOME) LIKE :termo3 OR UPPER(C.NOME) LIKE :termo4 OR UPPER(M.NOME) LIKE :termo5) ORDER BY P.NOME', [':termo1'=>$busca === '' ? null : $pesquisa, ':termo2'=>$pesquisa, ':termo3'=>$pesquisa, ':termo4'=>$pesquisa, ':termo5'=>$pesquisa]);
+    $produtos = consultar($conn, 'SELECT P.ID_PRODUTO, P.CODIGO, P.NOME, P.DESCRICAO, P.PRECO, P.ESTOQUE_MINIMO, P.ID_CATEGORIA, P.ID_MARCA, C.NOME AS CATEGORIA, M.NOME AS MARCA, E.QUANTIDADE FROM PRODUTO P LEFT JOIN ESTOQUE E ON E.ID_PRODUTO=P.ID_PRODUTO JOIN CATEGORIA C ON C.ID_CATEGORIA=P.ID_CATEGORIA JOIN MARCA M ON M.ID_MARCA=P.ID_MARCA WHERE (:termo1 IS NULL OR UPPER(P.CODIGO) LIKE :termo2 OR UPPER(P.NOME) LIKE :termo3 OR UPPER(C.NOME) LIKE :termo4 OR UPPER(M.NOME) LIKE :termo5) ORDER BY P.NOME', [':termo1'=>$busca === '' ? null : $pesquisa, ':termo2'=>$pesquisa, ':termo3'=>$pesquisa, ':termo4'=>$pesquisa, ':termo5'=>$pesquisa]);
     if ($_SERVER['REQUEST_METHOD'] !== 'POST' && isset($_GET['editar'])) {
         $idEditar = filter_var($_GET['editar'], FILTER_VALIDATE_INT);
         if ($idEditar) {
@@ -137,7 +143,7 @@ $mensagens = ['criado'=>'Produto cadastrado com sucesso.', 'editado'=>'Produto a
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Produtos | AutoPeças</title>
     <link rel="stylesheet" href="css/estilo.css">
-    <script src="https://unpkg.com/lucide@latest"></script>
+
 
     <style>
         .menu a {
@@ -222,7 +228,8 @@ $mensagens = ['criado'=>'Produto cadastrado com sucesso.', 'editado'=>'Produto a
         .botao-excluir-produto i {
             color: #ffffff;
         }
-    </style>
+     .icone-sem-js {display:inline-block; min-width:1.05em; font-size:1.1em; font-weight:700; line-height:1; vertical-align:middle;}
+</style>
 </head>
 
 <body>
@@ -240,37 +247,37 @@ $mensagens = ['criado'=>'Produto cadastrado com sucesso.', 'editado'=>'Produto a
 
         <nav class="menu">
             <a href="index.php">
-                <i data-lucide="layout-dashboard"></i>
+                <span class="icone-sem-js" aria-hidden="true">▦</span>
                 Dashboard
             </a>
 
             <a href="clientes.php">
-                <i data-lucide="users-round"></i>
+                <span class="icone-sem-js" aria-hidden="true">♧</span>
                 Clientes
             </a>
 
             <a href="veiculos.php">
-                <i data-lucide="car-front"></i>
+                <span class="icone-sem-js" aria-hidden="true">▱</span>
                 Veículos
             </a>
 
             <a href="produtos.php" class="ativo">
-                <i data-lucide="package"></i>
+                <span class="icone-sem-js" aria-hidden="true">▣</span>
                 Produtos
             </a>
 
             <a href="estoque.php">
-                <i data-lucide="boxes"></i>
+                <span class="icone-sem-js" aria-hidden="true">▤</span>
                 Estoque
             </a>
 
             <a href="orcamentos.php">
-                <i data-lucide="file-text"></i>
+                <span class="icone-sem-js" aria-hidden="true">≡</span>
                 Orçamentos
             </a>
 
             <a href="relatorios.php">
-                <i data-lucide="chart-no-axes-column"></i>
+                <span class="icone-sem-js" aria-hidden="true">▥</span>
                 Relatórios
             </a>
         </nav>
@@ -292,11 +299,25 @@ $mensagens = ['criado'=>'Produto cadastrado com sucesso.', 'editado'=>'Produto a
         <?php if ($erro): ?><p role="alert" style="padding:14px;color:#b91c1c;background:#fee2e2;border-radius:8px;"><?= h($erro) ?></p><?php endif; ?>
         <?php if (isset($mensagens[$_GET['ok'] ?? ''])): ?><p role="status" style="padding:14px;color:#166534;background:#dcfce7;border-radius:8px;"><?= h($mensagens[$_GET['ok']]) ?></p><?php endif; ?>
         <section class="indicadores">
-            <article class="card-indicador"><div class="indicador-topo"><span>Produtos exibidos</span><span class="icone-card azul"><i data-lucide="package"></i></span></div><h3><?= count($produtos) ?></h3><p class="texto-secundario"><?= $busca !== '' ? 'Resultado da busca' : 'Produtos cadastrados' ?></p></article>
-            <article class="card-indicador"><div class="indicador-topo"><span>Estoque disponível</span><span class="icone-card roxo"><i data-lucide="boxes"></i></span></div><h3>—</h3><p class="texto-secundario">Aguardando tabela ESTOQUE</p></article>
-            <article class="card-indicador"><div class="indicador-topo"><span>Estoque baixo</span><span class="icone-card laranja"><i data-lucide="triangle-alert"></i></span></div><h3>—</h3><p class="texto-secundario">Aguardando tabela ESTOQUE</p></article>
-            <article class="card-indicador"><div class="indicador-topo"><span>Categorias</span><span class="icone-card verde"><i data-lucide="tags"></i></span></div><h3><?= count($categorias) ?></h3><p class="texto-secundario">Categorias cadastradas</p></article>
+            <article class="card-indicador"><div class="indicador-topo"><span>Produtos exibidos</span><span class="icone-card azul"><span class="icone-sem-js" aria-hidden="true">▣</span></span></div><h3><?= count($produtos) ?></h3><p class="texto-secundario"><?= $busca !== '' ? 'Resultado da busca' : 'Produtos cadastrados' ?></p></article>
+            <article class="card-indicador"><div class="indicador-topo"><span>Estoque disponível</span><span class="icone-card roxo"><span class="icone-sem-js" aria-hidden="true">▤</span></span></div><h3><?= number_format((int)$estoqueResumo['UNIDADES'],0,',','.') ?></h3><p class="texto-secundario">Unidades cadastradas</p></article>
+            <article class="card-indicador"><div class="indicador-topo"><span>Estoque baixo</span><span class="icone-card laranja"><span class="icone-sem-js" aria-hidden="true">!</span></span></div><h3><?= (int)$estoqueResumo['BAIXOS'] ?></h3><p class="texto-secundario">Abaixo ou no mínimo</p></article>
+            <article class="card-indicador"><div class="indicador-topo"><span>Categorias</span><span class="icone-card verde"><span class="icone-sem-js" aria-hidden="true">•</span></span></div><h3><?= count($categorias) ?></h3><p class="texto-secundario">Categorias cadastradas</p></article>
         </section>
+        <?php $confirmarProduto = filter_var($_GET['excluir'] ?? null, FILTER_VALIDATE_INT); ?>
+        <?php if ($confirmarProduto): ?>
+        <section class="secao" role="alert">
+            <h2>Confirmar exclusão do produto</h2>
+            <p>Você tem certeza que deseja excluir o produto selecionado? Produtos com estoque ou orçamentos vinculados não poderão ser excluídos.</p>
+            <form method="post" action="produtos.php">
+                <input type="hidden" name="csrf" value="<?= h($_SESSION['automax_csrf']) ?>">
+                <input type="hidden" name="acao" value="excluir">
+                <input type="hidden" name="id" value="<?= (int)$confirmarProduto ?>">
+                <button type="submit" class="botao botao-excluir-produto">Confirmar exclusão</button>
+                <a href="produtos.php" class="botao botao-secundario">Cancelar</a>
+            </form>
+        </section>
+        <?php endif; ?>
         <section class="secao" id="formulario-produto">
             <div class="secao-cabecalho"><div><h2><?= $editando ? 'Editar produto' : 'Cadastrar produto' ?></h2><p>Informe os dados da peça automotiva.</p></div></div>
             <form action="produtos.php" method="post" id="form-produto">
@@ -312,10 +333,10 @@ $mensagens = ['criado'=>'Produto cadastrado com sucesso.', 'editado'=>'Produto a
                     <div class="campo"><label for="estoque-minimo">Estoque mínimo *</label><input id="estoque-minimo" name="minimo" type="number" min="0" step="1" required value="<?= h($valores['minimo']) ?>"></div>
                     <div class="campo campo-completo"><label for="descricao">Descrição</label><textarea id="descricao" name="descricao" maxlength="300" rows="3" placeholder="Detalhes, aplicação e compatibilidade da peça..."><?= h($valores['descricao']) ?></textarea></div>
                 </div>
-                <p class="texto-secundario">Preço de custo e quantidade disponível serão integrados quando as respectivas estruturas existirem no banco.</p>
+                <p class="texto-secundario">A quantidade pode ser atualizada na página Estoque. Preço de custo não é registrado no banco.</p>
                 <div class="form-acoes">
-                    <a href="produtos.php" class="botao botao-secundario"><i data-lucide="eraser"></i> <?= $editando ? 'Cancelar edição' : 'Limpar formulário' ?></a>
-                    <button type="submit" class="botao botao-principal"><i data-lucide="<?= $editando ? 'save' : 'plus' ?>"></i><?= $editando ? ' Salvar alterações' : ' Cadastrar produto' ?></button>
+                    <a href="produtos.php" class="botao botao-secundario"><span class="icone-sem-js" aria-hidden="true">↺</span> <?= $editando ? 'Cancelar edição' : 'Limpar formulário' ?></a>
+                    <button type="submit" class="botao botao-principal"><span class="icone-sem-js" aria-hidden="true">✓</span><?= $editando ? ' Salvar alterações' : ' Cadastrar produto' ?></button>
                 </div>
             </form>
         </section>
@@ -323,19 +344,19 @@ $mensagens = ['criado'=>'Produto cadastrado com sucesso.', 'editado'=>'Produto a
             <div class="secao-cabecalho"><div><h2>Produtos cadastrados</h2><p>Consulte, edite ou exclua os produtos da loja.</p></div></div>
             <form class="filtros" action="produtos.php" method="get">
                 <div class="campo busca"><label for="buscar-produto">Buscar produto</label><input type="search" id="buscar-produto" name="busca" placeholder="Código, nome, marca ou categoria..." value="<?= h($busca) ?>"></div>
-                <button type="submit" class="botao botao-principal"><i data-lucide="search"></i> Buscar</button>
-                <a class="botao botao-secundario" href="produtos.php"><i data-lucide="x"></i> Limpar</a>
+                <button type="submit" class="botao botao-principal"><span class="icone-sem-js" aria-hidden="true">⌕</span> Buscar</button>
+                <a class="botao botao-secundario" href="produtos.php"><span class="icone-sem-js" aria-hidden="true">×</span> Limpar</a>
             </form>
             <p class="resultado-busca">Exibindo <?= count($produtos) ?> produto(s).</p>
             <div class="tabela-container"><table id="tabela-produtos"><thead><tr><th>Código</th><th>Produto</th><th>Categoria</th><th>Marca</th><th>Preço de venda</th><th>Estoque</th><th>Status</th><th>Ações</th></tr></thead><tbody>
             <?php if (!$produtos): ?><tr><td colspan="8" style="text-align:center;padding:25px">Nenhum produto encontrado.</td></tr><?php endif; ?>
             <?php foreach ($produtos as $p): ?>
-                <tr><td><?= h($p['CODIGO']) ?></td><td><?= h($p['NOME']) ?></td><td><?= h($p['CATEGORIA']) ?></td><td><?= h($p['MARCA']) ?></td><td>R$ <?= number_format((float)$p['PRECO'], 2, ',', '.') ?></td><td>—</td><td><span class="texto-secundario">Pendente</span></td><td><div class="acoes-produto"><a class="botao botao-principal" href="produtos.php?editar=<?= urlencode((string)$p['ID_PRODUTO']) ?>#formulario-produto"><i data-lucide="pencil"></i> Editar</a><form method="post" action="produtos.php" onsubmit="return confirm('Deseja realmente excluir este produto?');"><input type="hidden" name="csrf" value="<?= h($_SESSION['automax_csrf']) ?>"><input type="hidden" name="acao" value="excluir"><input type="hidden" name="id" value="<?= h($p['ID_PRODUTO']) ?>"><button class="botao botao-excluir-produto" type="submit"><i data-lucide="trash-2"></i> Excluir</button></form></div></td></tr>
+                <tr><td><?= h($p['CODIGO']) ?></td><td><?= h($p['NOME']) ?></td><td><?= h($p['CATEGORIA']) ?></td><td><?= h($p['MARCA']) ?></td><td>R$ <?= number_format((float)$p['PRECO'], 2, ',', '.') ?></td><td><?= $p['QUANTIDADE'] === null ? '—' : number_format((int)$p['QUANTIDADE'],0,',','.') ?></td><td><span class="texto-secundario"><?= $p['QUANTIDADE'] === null ? 'Não cadastrado' : ((int)$p['QUANTIDADE']===0 ? 'Esgotado' : ((int)$p['QUANTIDADE'] <= (int)$p['ESTOQUE_MINIMO'] ? 'Estoque baixo' : 'Disponível')) ?></span></td><td><div class="acoes-produto"><a class="botao botao-principal" href="produtos.php?editar=<?= urlencode((string)$p['ID_PRODUTO']) ?>#formulario-produto"><span class="icone-sem-js" aria-hidden="true">✎</span> Editar</a><a class="botao botao-excluir-produto" href="produtos.php?excluir=<?= (int)$p['ID_PRODUTO'] ?>">Excluir</a></div></td></tr>
             <?php endforeach; ?>
             </tbody></table></div>
         </section>
         <footer class="rodape"><p>Sistema AutoPeças — Gestão de produtos</p></footer>
     </main>
-    <script>if (window.lucide) lucide.createIcons();</script>
+
 </body>
 </html>

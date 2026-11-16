@@ -7,8 +7,11 @@ RUN apt-get update && apt-get install -y \
     unzip \
     curl \
     libzip-dev \
+    libonig-dev \
     apache2-utils \
     && rm -rf /var/lib/apt/lists/*
+
+RUN docker-php-ext-install -j$(nproc) mbstring
 
 WORKDIR /opt/oracle
 
@@ -52,7 +55,9 @@ RUN mkdir -p /var/automax_private \
 
 RUN chown -R www-data:www-data /var/www/html
 
-RUN a2enmod auth_basic authn_file
+RUN a2enmod auth_basic authn_file headers
+
+RUN printf 'display_errors=Off\nlog_errors=On\nsession.cookie_httponly=1\n' > /usr/local/etc/php/conf.d/automax.ini
 
 RUN printf '%s\n' \
     '<Directory /var/www/html>' \

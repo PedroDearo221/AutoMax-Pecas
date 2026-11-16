@@ -1,12 +1,55 @@
-
+<?php
+declare(strict_types=1);
+require_once __DIR__ . '/automax.php';
+axSession();
+$erro = '';
+$usuario = axUser();
+if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
+    try {
+        axCheckCsrf();
+        $acao = (string)($_POST['acao'] ?? 'login');
+        if ($acao === 'sair') {
+            $_SESSION = [];
+            session_regenerate_id(true);
+            header('Location: login.php?saiu=1', true, 303);
+            exit;
+        }
+        if ($acao !== 'login') throw new RuntimeException('Operação inválida.');
+        if (($_SESSION['ax_tentar_apos'] ?? 0) > time()) {
+            throw new RuntimeException('Muitas tentativas. Aguarde alguns minutos.');
+        }
+        $email = mb_strtolower(trim((string)($_POST['email'] ?? '')));
+        $senha = (string)($_POST['senha'] ?? '');
+        if (mb_strlen($email)>100 || !filter_var($email,FILTER_VALIDATE_EMAIL) || $senha==='') {
+            throw new RuntimeException('E-mail ou senha inválidos.');
+        }
+        $conn = axConn();
+        try {
+            $rows = axQuery($conn, 'SELECT ID_USUARIO,NOME,EMAIL,SENHA,TIPO,ATIVO FROM USUARIO WHERE LOWER(EMAIL)=:email', ['email'=>$email]);
+        } finally { oci_close($conn); }
+        $registro = $rows[0] ?? null;
+        if (!$registro || $registro['ATIVO'] !== 'S' || !password_verify($senha,(string)$registro['SENHA'])) {
+            $_SESSION['ax_falhas']=(int)($_SESSION['ax_falhas'] ?? 0)+1;
+            if ($_SESSION['ax_falhas'] >= 5) {
+                $_SESSION['ax_tentar_apos']=time()+180;
+                $_SESSION['ax_falhas']=0;
+            }
+            throw new RuntimeException('E-mail ou senha inválidos.');
+        }
+        session_regenerate_id(true);
+        $_SESSION['ax_user']=['id'=>(int)$registro['ID_USUARIO'],'nome'=>(string)$registro['NOME'],'tipo'=>(string)$registro['TIPO']];
+        unset($_SESSION['ax_falhas'],$_SESSION['ax_tentar_apos']);
+        header('Location: index.php', true, 303);
+        exit;
+    } catch (Throwable $e) {
+        error_log('AutoMax login: ' . $e->getMessage());
+        $erro = $e instanceof RuntimeException ? $e->getMessage() : 'Não foi possível acessar a conta.';
+    }
+}
+?>
 <!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Login | AutoPeças</title>
-
-    <style>
+<html lang="pt-BR"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Login | AutoMax-Peças</title><style>
         * {
             margin: 0;
             padding: 0;
@@ -263,137 +306,31 @@
                 width: 100%;
             }
         }
-    </style>
-</head>
 
-<body>
-
-    <section class="apresentacao">
-        <div class="logo">
-            <div class="logo-icone">A</div>
-            <div>
-                <h1>Auto<span>Peças</span></h1>
-                <small>GESTÃO AUTOMOTIVA</small>
-            </div>
-        </div>
-
-        <div class="texto-apresentacao">
-            <span class="etiqueta">ÁREA DO CLIENTE</span>
-
-            <h2>Sua experiência automotiva, <span>mais simples.</span></h2>
-
-            <p>
-                Acesse sua conta para acompanhar seus orçamentos,
-                consultar suas solicitações e manter seus dados organizados.
-            </p>
-
-            <div class="beneficios">
-                <span>✓ Acompanhe seus orçamentos</span>
-                <span>✓ Consulte suas solicitações</span>
-                <span>✓ Tenha seus dados sempre à mão</span>
-            </div>
-        </div>
-
-        <footer>© 2026 AutoPeças. Todos os direitos reservados.</footer>
-    </section>
-
-    <main class="area-login">
-        <div class="formulario">
-            <h2>Bem-vindo de volta!</h2>
-            <p class="subtitulo">Entre com seus dados para acessar sua conta.</p>
-
-            <div class="mensagem" id="mensagem" role="status"></div>
-
-            <form id="formLogin">
-                <div class="campo">
-                    <label for="email">E-mail</label>
-                    <input
-                        type="email"
-                        id="email"
-                        placeholder="seuemail@exemplo.com"
-                        autocomplete="username"
-                        required
-                    >
-                </div>
-
-                <div class="campo">
-                    <label for="senha">Senha</label>
-                    <div class="senha">
-                        <input
-                            type="password"
-                            id="senha"
-                            placeholder="Digite sua senha"
-                            autocomplete="current-password"
-                            required
-                        >
-                        <button type="button" class="mostrar" id="mostrar">
-                            Mostrar
-                        </button>
-                    </div>
-                </div>
-
-                <div class="opcoes">
-                    <label class="lembrar">
-                        <input type="checkbox" id="lembrar">
-                        Lembrar meu e-mail
-                    </label>
-
-                    <a href="recuperar-senha.php">Esqueci minha senha</a>
-                </div>
-
-                <button class="botao" type="submit">Entrar na minha conta →</button>
-            </form>
-
-            <div class="cadastro">
-                Ainda não tem uma conta?
-                <a href="cadastro-cliente.php">Cadastre-se</a>
-            </div>
-
-            <div class="ajuda">
-                Precisa de ajuda?
-                <a href="contato.php">Fale conosco</a>
-            </div>
-        </div>
-    </main>
-
-    <script>
-        const email = document.getElementById("email");
-        const senha = document.getElementById("senha");
-        const mensagem = document.getElementById("mensagem");
-
-        document.getElementById("mostrar").addEventListener("click", function () {
-            const mostrarSenha = senha.type === "password";
-            senha.type = mostrarSenha ? "text" : "password";
-            this.textContent = mostrarSenha ? "Ocultar" : "Mostrar";
-        });
-
-        try {
-            const emailSalvo = localStorage.getItem("autopecas_email_lembrado");
-
-            if (emailSalvo) {
-                email.value = emailSalvo;
-                document.getElementById("lembrar").checked = true;
-            }
-        } catch (erro) {}
-
-        document.getElementById("formLogin").addEventListener("submit", function (event) {
-            event.preventDefault();
-
-            mensagem.style.display = "block";
-            mensagem.textContent =
-                "A interface está pronta, mas o login ainda precisa ser conectado ao sistema de autenticação. Nenhuma senha foi validada.";
-
-            if (document.getElementById("lembrar").checked) {
-                try {
-                    localStorage.setItem("autopecas_email_lembrado", email.value.trim());
-                } catch (erro) {}
-            } else {
-                try {
-                    localStorage.removeItem("autopecas_email_lembrado");
-                } catch (erro) {}
-            }
-        });
-    </script>
-
-</body>
-</html>
+.mensagem {display:block; background:#fff0f0; color:#a52b2b; border-radius:8px; padding:12px; margin-bottom:18px;}
+</style></head><body>
+<section class="apresentacao">
+ <div class="logo"><span class="logo-icone">A</span><div><h1>Auto<span>Peças</span></h1><small>SISTEMA DE GESTÃO</small></div></div>
+ <div class="texto-apresentacao"><span class="etiqueta">SISTEMA DE GESTÃO</span><h2>Gerencie suas <span>autopeças.</span></h2>
+ <p>Clientes, veículos, produtos, estoque e orçamentos integrados ao Oracle FreeSQL.</p></div>
+ <footer>© 2026 AutoMax-Peças · Projeto acadêmico</footer>
+</section>
+<main class="area-login"><div class="formulario"><h2>Entrar</h2><p class="subtitulo">Acesse o sistema com um usuário cadastrado na tabela USUARIO.</p>
+<?php if ($erro): ?><div class="mensagem" role="alert"><?= axH($erro) ?></div><?php endif; ?>
+<?php if (isset($_GET['acesso'])): ?><div class="mensagem">Faça login para acessar esta página.</div><?php endif; ?>
+<?php if (isset($_GET['saiu'])): ?><p class="subtitulo">Sessão encerrada.</p><?php endif; ?>
+<?php if ($usuario): ?>
+ <p class="subtitulo">Conectado como <strong><?= axH($usuario['nome']) ?></strong> (<?= axH($usuario['tipo']) ?>).</p>
+ <form method="post" action="login.php"><input type="hidden" name="csrf" value="<?= axH(axCsrf()) ?>"><input type="hidden" name="acao" value="sair"><button type="submit" class="botao">Sair do sistema</button></form>
+ <p class="cadastro"><a href="index.php">Voltar ao Dashboard</a></p>
+<?php else: ?>
+ <form method="post" action="login.php">
+ <input type="hidden" name="csrf" value="<?= axH(axCsrf()) ?>">
+ <input type="hidden" name="acao" value="login">
+ <div class="campo"><label for="email">E-mail</label><input type="email" name="email" id="email" maxlength="100" autocomplete="username" required value="<?= axH($_POST['email'] ?? '') ?>"></div>
+ <div class="campo"><label for="senha">Senha</label><input type="password" name="senha" id="senha" autocomplete="current-password" required></div>
+ <button class="botao" type="submit">Entrar no sistema</button>
+ </form>
+ <div class="cadastro">Ainda não existe administrador? Execute o script <code>database/criar_admin.php</code> no terminal do XAMPP.</div>
+<?php endif; ?>
+</div></main></body></html>

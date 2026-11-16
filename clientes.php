@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
-session_start();
+require_once __DIR__ . '/automax.php';
+axSession();
+axRequireLogin();
 require_once dirname(__DIR__, 2) . '/automax_private/conexao.php';
 
 function h(mixed $value): string {
@@ -129,6 +131,12 @@ try {
 } finally {
     if ($conn) oci_close($conn);
 }
+$buscaCliente = mb_substr(trim((string)($_GET['buscar'] ?? '')), 0, 100);
+$clientesVisiveis = array_values(array_filter($clientes, static function ($c) use ($buscaCliente): bool {
+    if ($buscaCliente === '') return true;
+    $texto = implode(' ', [(string)($c['NOME'] ?? ''), (string)($c['CPF'] ?? ''), (string)($c['EMAIL'] ?? '')]);
+    return mb_stripos($texto, $buscaCliente, 0, 'UTF-8') !== false;
+}));
 $total = count($clientes);
 $totalTelefone = count(array_filter($clientes, fn($c)=>trim((string)($c['TELEFONE'] ?? '')) !== ''));
 $totalEmail = count(array_filter($clientes, fn($c)=>trim((string)($c['EMAIL'] ?? '')) !== ''));
@@ -140,7 +148,7 @@ $totalEmail = count(array_filter($clientes, fn($c)=>trim((string)($c['EMAIL'] ??
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Clientes | AutoPeças</title>
     <link rel="stylesheet" href="css/estilo.css">
-    <script src="https://unpkg.com/lucide@latest"></script>
+
 
     <style>
         .menu a {
@@ -242,7 +250,8 @@ $totalEmail = count(array_filter($clientes, fn($c)=>trim((string)($c['EMAIL'] ??
                 width: 100%;
             }
         }
-    </style>
+     .icone-sem-js {display:inline-block; min-width:1.05em; font-size:1.1em; font-weight:700; line-height:1; vertical-align:middle;}
+</style>
 </head>
 
 <body>
@@ -260,37 +269,37 @@ $totalEmail = count(array_filter($clientes, fn($c)=>trim((string)($c['EMAIL'] ??
 
     <nav class="menu">
         <a href="index.php">
-            <i data-lucide="layout-dashboard"></i>
+            <span class="icone-sem-js" aria-hidden="true">▦</span>
             Dashboard
         </a>
 
         <a href="clientes.php" class="ativo">
-            <i data-lucide="users-round"></i>
+            <span class="icone-sem-js" aria-hidden="true">♧</span>
             Clientes
         </a>
 
         <a href="veiculos.php">
-            <i data-lucide="car-front"></i>
+            <span class="icone-sem-js" aria-hidden="true">▱</span>
             Veículos
         </a>
 
         <a href="produtos.php">
-            <i data-lucide="package"></i>
+            <span class="icone-sem-js" aria-hidden="true">▣</span>
             Produtos
         </a>
 
         <a href="estoque.php">
-            <i data-lucide="boxes"></i>
+            <span class="icone-sem-js" aria-hidden="true">▤</span>
             Estoque
         </a>
 
         <a href="orcamentos.php">
-            <i data-lucide="file-text"></i>
+            <span class="icone-sem-js" aria-hidden="true">≡</span>
             Orçamentos
         </a>
 
         <a href="relatorios.php">
-            <i data-lucide="chart-no-axes-column"></i>
+            <span class="icone-sem-js" aria-hidden="true">▥</span>
             Relatórios
         </a>
     </nav>
@@ -331,7 +340,7 @@ $totalEmail = count(array_filter($clientes, fn($c)=>trim((string)($c['EMAIL'] ??
             <div class="indicador-topo">
                 <span>Total de clientes</span>
                 <span class="icone-card azul">
-                    <i data-lucide="users-round"></i>
+                    <span class="icone-sem-js" aria-hidden="true">♧</span>
                 </span>
             </div>
             <h3 id="total-clientes"><?= $total ?></h3>
@@ -342,7 +351,7 @@ $totalEmail = count(array_filter($clientes, fn($c)=>trim((string)($c['EMAIL'] ??
             <div class="indicador-topo">
                 <span>Pessoas físicas</span>
                 <span class="icone-card roxo">
-                    <i data-lucide="user-round"></i>
+                    <span class="icone-sem-js" aria-hidden="true">•</span>
                 </span>
             </div>
             <h3 id="total-pessoas-fisicas"><?= $total ?></h3>
@@ -353,7 +362,7 @@ $totalEmail = count(array_filter($clientes, fn($c)=>trim((string)($c['EMAIL'] ??
             <div class="indicador-topo">
                 <span>Com telefone</span>
                 <span class="icone-card verde">
-                    <i data-lucide="phone"></i>
+                    <span class="icone-sem-js" aria-hidden="true">•</span>
                 </span>
             </div>
             <h3 id="total-telefones"><?= $totalTelefone ?></h3>
@@ -364,7 +373,7 @@ $totalEmail = count(array_filter($clientes, fn($c)=>trim((string)($c['EMAIL'] ??
             <div class="indicador-topo">
                 <span>Com e-mail</span>
                 <span class="icone-card laranja">
-                    <i data-lucide="mail"></i>
+                    <span class="icone-sem-js" aria-hidden="true">•</span>
                 </span>
             </div>
             <h3 id="total-emails"><?= $totalEmail ?></h3>
@@ -377,6 +386,20 @@ $totalEmail = count(array_filter($clientes, fn($c)=>trim((string)($c['EMAIL'] ??
     <p class="resultado-busca" role="alert" style="color:#b91c1c"><?= h($erro) ?></p>
     <?php elseif (isset($_GET['ok'])): ?>
     <p class="resultado-busca" role="status" style="color:#198754">Operação concluída no Oracle FreeSQL.</p>
+    <?php endif; ?>
+    <?php $clienteExcluir = filter_var($_GET['excluir'] ?? null, FILTER_VALIDATE_INT); ?>
+    <?php if ($clienteExcluir): ?>
+    <?php foreach ($clientes as $c): if ((int)$c['ID_CLIENTE']!==(int)$clienteExcluir) continue; ?>
+    <section class="secao" role="alert"><h2>Confirmar exclusão</h2>
+    <p>Deseja excluir o cliente <?= h($c['NOME']) ?>? A exclusão será bloqueada se houver veículos ou orçamentos vinculados.</p>
+    <form method="post" action="clientes.php">
+        <input type="hidden" name="csrf" value="<?= h($_SESSION['automax_csrf']) ?>">
+        <input type="hidden" name="acao" value="excluir">
+        <input type="hidden" name="id" value="<?= (int)$c['ID_CLIENTE'] ?>">
+        <button type="submit" class="botao botao-principal">Confirmar exclusão</button>
+        <a class="botao botao-secundario" href="clientes.php">Cancelar</a>
+    </form></section>
+    <?php endforeach; ?>
     <?php endif; ?>
     <section class="secao" id="formulario-cliente">
 
@@ -454,7 +477,7 @@ $totalEmail = count(array_filter($clientes, fn($c)=>trim((string)($c['EMAIL'] ??
                         required
                      value="<?= h($dados['cep']) ?>">
                     <small id="mensagem-cep" class="mensagem-cep">
-                        Digite o CEP para preencher o endereço.
+                        Preencha o endereço manualmente (sem JavaScript).
                     </small>
                 </div>
 
@@ -464,7 +487,7 @@ $totalEmail = count(array_filter($clientes, fn($c)=>trim((string)($c['EMAIL'] ??
                         type="text"
                         id="endereco"
                         name="endereco"
-                        placeholder="Preenchido pelo CEP"
+                        placeholder="Preencha manualmente"
                         autocomplete="address-line1"
                      value="<?= h($dados['endereco']) ?>">
                 </div>
@@ -498,7 +521,7 @@ $totalEmail = count(array_filter($clientes, fn($c)=>trim((string)($c['EMAIL'] ??
                         type="text"
                         id="bairro"
                         name="bairro"
-                        placeholder="Preenchido pelo CEP"
+                        placeholder="Preencha manualmente"
                      value="<?= h($dados['bairro']) ?>">
                 </div>
 
@@ -508,7 +531,7 @@ $totalEmail = count(array_filter($clientes, fn($c)=>trim((string)($c['EMAIL'] ??
                         type="text"
                         id="cidade"
                         name="cidade"
-                        placeholder="Preenchido pelo CEP"
+                        placeholder="Preencha manualmente"
                      value="<?= h($dados['cidade']) ?>">
                 </div>
 
@@ -526,20 +549,14 @@ $totalEmail = count(array_filter($clientes, fn($c)=>trim((string)($c['EMAIL'] ??
             </div>
 
             <div class="form-acoes">
-                <button
-                    type="button"
-                    id="cancelar-edicao"
-                    class="botao botao-secundario"
-                >
-                    Limpar formulário
-                </button>
+                <a href="clientes.php#formulario-cliente" class="botao botao-secundario">Limpar formulário</a>
 
                 <button
                     type="submit"
                     id="botao-salvar-cliente"
                     class="botao botao-principal"
                 >
-                    Cadastrar cliente
+                    <?= $idEdicao !== '' ? 'Salvar alterações' : 'Cadastrar cliente' ?>
                 </button>
             </div>
         </form>
@@ -558,35 +575,29 @@ $totalEmail = count(array_filter($clientes, fn($c)=>trim((string)($c['EMAIL'] ??
             </span>
         </div>
 
-        <div class="filtros">
+        <form class="filtros" method="get" action="clientes.php">
             <div class="campo busca">
                 <label for="buscar">Buscar cliente</label>
                 <input
                     type="search"
                     id="buscar"
-                    name="buscar"
+                    name="buscar" value="<?= h($buscaCliente) ?>"
                     placeholder="Digite o nome ou CPF do cliente..."
                 >
             </div>
 
             <button
-                type="button"
+                type="submit"
                 id="btn-buscar"
                 class="botao botao-principal"
             >
                 Buscar
             </button>
 
-            <button
-                type="button"
-                id="btn-limpar-busca"
-                class="botao botao-secundario"
-            >
-                Limpar
-            </button>
-        </div>
+            <a href="clientes.php" class="botao botao-secundario">Limpar</a>
+        </form>
 
-        <p id="resultado-busca" class="resultado-busca" aria-live="polite"></p>
+        <p id="resultado-busca" class="resultado-busca" aria-live="polite">Exibindo <?= count($clientesVisiveis) ?> de <?= count($clientes) ?> cliente(s).</p>
 
         <div class="tabela-container">
             <table id="tabela-clientes">
@@ -602,7 +613,7 @@ $totalEmail = count(array_filter($clientes, fn($c)=>trim((string)($c['EMAIL'] ??
                 </thead>
 
                 <tbody>
-                <?php foreach ($clientes as $cliente): ?>
+                <?php foreach ($clientesVisiveis as $cliente): ?>
                     <tr>
                         <td><?= h(cpfVisivel((string)$cliente['CPF'])) ?></td>
                         <td><?= h($cliente['NOME']) ?></td>
@@ -612,17 +623,12 @@ $totalEmail = count(array_filter($clientes, fn($c)=>trim((string)($c['EMAIL'] ??
                         <td>
                             <div class="acoes-cliente">
                                 <a class="botao botao-principal botao-editar" href="clientes.php?editar=<?= (int)$cliente['ID_CLIENTE'] ?>#formulario-cliente">Editar</a>
-                                <form method="post" action="clientes.php" onsubmit="return confirm('Deseja realmente excluir este cliente?');">
-                                    <input type="hidden" name="acao" value="excluir">
-                                    <input type="hidden" name="csrf" value="<?= h($_SESSION['automax_csrf']) ?>">
-                                    <input type="hidden" name="id" value="<?= (int)$cliente['ID_CLIENTE'] ?>">
-                                    <button class="botao-excluir" type="submit">Excluir</button>
-                                </form>
+                                <a href="clientes.php?excluir=<?= (int)$cliente['ID_CLIENTE'] ?>" class="botao-excluir">Excluir</a>
                             </div>
                         </td>
                     </tr>
                 <?php endforeach; ?>
-                <?php if (!$clientes): ?><tr><td colspan="6" style="text-align:center;padding:24px">Nenhum cliente cadastrado.</td></tr><?php endif; ?>
+                <?php if (!$clientesVisiveis): ?><tr><td colspan="6" style="text-align:center;padding:24px">Nenhum cliente encontrado.</td></tr><?php endif; ?>
                 </tbody>
             </table>
         </div>
@@ -635,68 +641,7 @@ $totalEmail = count(array_filter($clientes, fn($c)=>trim((string)($c['EMAIL'] ??
 
 </main>
 
-<script>
-    if (window.lucide) lucide.createIcons();
-    const cpf = document.getElementById('cpf');
-    const tel = document.getElementById('telefone');
-    const cep = document.getElementById('cep');
-    const msg = document.getElementById('mensagem-cep');
-    cpf.addEventListener('input', () => {
-        let n = cpf.value.replace(/\D/g, '').slice(0,11);
-        cpf.value = n.replace(/^(\d{3})(\d)/,'$1.$2').replace(/^(\d{3})\.(\d{3})(\d)/,'$1.$2.$3').replace(/(\d{3})(\d{1,2})$/,'$1-$2');
-    });
-    tel.addEventListener('input', () => {
-        const n = tel.value.replace(/\D/g,'').slice(0,11);
-        if (n.length <= 2) tel.value = n ? '(' + n : '';
-        else if (n.length <= 6) tel.value = '('+n.slice(0,2)+') '+n.slice(2);
-        else { const k=n.length===11?7:6; tel.value='('+n.slice(0,2)+') '+n.slice(2,k)+'-'+n.slice(k); }
-    });
-    let ultimaConsulta=0;
-    cep.addEventListener('input', () => {
-        const n=cep.value.replace(/\D/g,'').slice(0,8);
-        cep.value=n.length>5?n.slice(0,5)+'-'+n.slice(5):n;
-        if (n.length===8) consultarCEP(n);
-    });
-    async function consultarCEP(n) {
-        const atual=++ultimaConsulta;
-        msg.textContent='Consultando CEP...';
-        try {
-            const r=await fetch('https://viacep.com.br/ws/'+n+'/json/');
-            if (!r.ok) throw new Error('Falha na consulta');
-            const d=await r.json();
-            if (atual!==ultimaConsulta) return;
-            if (d.erro) throw new Error('CEP não encontrado');
-            const v={endereco:d.logradouro||'', bairro:d.bairro||'', cidade:d.localidade||'', estado:d.uf||''};
-            for (const [k,val] of Object.entries(v)) document.getElementById(k).value=val;
-            msg.textContent='CEP encontrado. Informe o número.';
-            msg.className='mensagem-cep sucesso';
-        } catch (e) {
-            if (atual!==ultimaConsulta) return;
-            msg.textContent='CEP não encontrado ou indisponível. Você pode digitar o endereço.';
-            msg.className='mensagem-cep erro';
-        }
-    }
-    document.getElementById('cancelar-edicao').addEventListener('click', () => {
-        location.href='clientes.php#formulario-cliente';
-    });
-    const busca=document.getElementById('buscar');
-    const linhas=[...document.querySelectorAll('#tabela-clientes tbody tr')].filter(tr=>tr.children.length===6);
-    const resultado=document.getElementById('resultado-busca');
-    function buscar() {
-        const termo=busca.value.trim().toLocaleLowerCase('pt-BR');
-        let n=0;
-        for (const tr of linhas) {
-            const encontrado=tr.textContent.toLocaleLowerCase('pt-BR').includes(termo);
-            tr.hidden=!encontrado;
-            if(encontrado)n++;
-        }
-        resultado.textContent='Exibindo '+n+' de '+linhas.length+' cliente(s).';
-    }
-    busca.addEventListener('input',buscar);
-    document.getElementById('btn-buscar').addEventListener('click',buscar);
-    document.getElementById('btn-limpar-busca').addEventListener('click',()=>{busca.value='';buscar();busca.focus();});
-    buscar();
-</script>
+
 
 </body>
 </html>

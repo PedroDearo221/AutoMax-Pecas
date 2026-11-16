@@ -1,16 +1,66 @@
-```html
-<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Orçamentos | AutoPeças</title>
+<?php
+declare(strict_types=1);
+require_once __DIR__ . '/automax.php';
+axRequireLogin();
+$erro=''; $mensagem=''; $orcamentos=[]; $todos=[];
+$statusAceitos=['PENDENTE','APROVADO','RECUSADO','CANCELADO'];
+if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
+    $conn=null;
+    try {
+        axRequireLogin(true);
+        axCheckCsrf();
+        $id=filter_var($_POST['id'] ?? null,FILTER_VALIDATE_INT,['options'=>['min_range'=>1]]);
+        if (!$id) throw new RuntimeException('Orçamento inválido.');
+        $acao=(string)($_POST['acao'] ?? '');
+        $conn=axConn();
+        $existente=axQuery($conn,'SELECT ID_ORCAMENTO FROM ORCAMENTO WHERE ID_ORCAMENTO=:id',['id'=>$id]);
+        if (!$existente) throw new RuntimeException('Orçamento não encontrado.');
+        if ($acao==='alterar_status') {
+            $status=(string)($_POST['status'] ?? '');
+            if (!in_array($status,$statusAceitos,true)) throw new RuntimeException('Status inválido.');
+            axRun($conn,'UPDATE ORCAMENTO SET STATUS=:status WHERE ID_ORCAMENTO=:id',['status'=>$status,'id'=>$id]);
+        } elseif ($acao==='excluir') {
+            axRun($conn,'DELETE FROM ITEM_ORCAMENTO WHERE ID_ORCAMENTO=:id',['id'=>$id]);
+            axRun($conn,'DELETE FROM ORCAMENTO WHERE ID_ORCAMENTO=:id',['id'=>$id]);
+        } else throw new RuntimeException('Ação desconhecida.');
+        if (!oci_commit($conn)) throw new RuntimeException('Não foi possível confirmar operação.');
+        header('Location: orcamentos.php?ok=1',true,303);
+        exit;
+    } catch (Throwable $e) {
+        if ($conn) oci_rollback($conn);
+        error_log('AutoMax orcamentos: '.$e->getMessage());
+        $erro=$e instanceof RuntimeException ? $e->getMessage() : 'Erro ao modificar orçamento.';
+    } finally { if ($conn) oci_close($conn); }
+}
+$conn=null;
+try {
+    $conn=axConn();
+    $todos=axQuery($conn,"SELECT O.ID_ORCAMENTO,O.ID_CLIENTE,C.NOME AS CLIENTE,O.STATUS,
+       O.DATA_ORCAMENTO, O.VALIDADE,O.VALOR_TOTAL,
+       TO_CHAR(O.DATA_ORCAMENTO,'DD/MM/YYYY') AS DATA_BR,
+       TO_CHAR(O.VALIDADE,'DD/MM/YYYY') AS VALIDADE_BR,
+       CASE WHEN O.STATUS='PENDENTE' AND O.VALIDADE < TRUNC(SYSDATE) THEN 'VENCIDO' ELSE O.STATUS END AS SITUACAO
+       FROM ORCAMENTO O JOIN CLIENTE C ON C.ID_CLIENTE=O.ID_CLIENTE
+       ORDER BY O.ID_ORCAMENTO DESC");
+} catch (Throwable $e) {
+    error_log('AutoMax listar orcamentos: '.$e->getMessage());
+    $erro='Não foi possível consultar os orçamentos.';
+} finally { if ($conn) oci_close($conn); }
+$busca=mb_substr(trim((string)($_GET['busca'] ?? '')),0,80);
+$statusFiltro=(string)($_GET['status'] ?? '');
+if (!in_array($statusFiltro,['','PENDENTE','APROVADO','RECUSADO','CANCELADO','VENCIDO'],true)) $statusFiltro='';
+$orcamentos=array_values(array_filter($todos,static function ($o) use ($busca,$statusFiltro): bool {
+    return (!$statusFiltro || $o['SITUACAO']===$statusFiltro) && ($busca==='' ||
+        mb_stripos((string)$o['ID_ORCAMENTO'].' '.(string)$o['CLIENTE'],$busca,0,'UTF-8')!==false);
+}));
+$total=count($todos);
+$pendentes=count(array_filter($todos,static fn($o)=>$o['STATUS']==='PENDENTE'));
+$valorTotal=array_reduce($todos,static fn($s,$o)=>$s+(float)$o['VALOR_TOTAL'],0.0);
+$confirmarId=filter_var($_GET['excluir'] ?? null,FILTER_VALIDATE_INT);
+?>
+<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Orçamentos | AutoMax-Peças</title>
+<link rel="stylesheet" href="css/estilo.css"><style>
 
-    <link rel="stylesheet" href="css/estilo.css">
-    <script src="https://unpkg.com/lucide@latest"></script>
-
-    <style>
-    
         .menu a {
             display: flex;
             align-items: center;
@@ -107,7 +157,7 @@
             background: #e0f7e9;
         }
 
-        
+
         .status-orcamento {
             display: inline-block;
             padding: 6px 10px;
@@ -258,381 +308,51 @@
                 flex-direction: column;
             }
         }
-    </style>
-</head>
 
-<body>
-
-    <aside class="sidebar">
-        <div class="logo">
-            <div class="logo-icon">A</div>
-
-            <div>
-                <h2>Auto<span>Peças</span></h2>
-                <small>Sistema de Gestão</small>
-            </div>
-        </div>
-
-        <p class="menu-titulo">MENU PRINCIPAL</p>
-
-        <nav class="menu">
-            <a href="index.php">
-                <i data-lucide="layout-dashboard"></i>
-                <span>Dashboard</span>
-            </a>
-
-            <a href="clientes.php">
-                <i data-lucide="users-round"></i>
-                <span>Clientes</span>
-            </a>
-
-            <a href="veiculos.php">
-                <i data-lucide="car-front"></i>
-                <span>Veículos</span>
-            </a>
-
-            <a href="produtos.php">
-                <i data-lucide="package"></i>
-                <span>Produtos</span>
-            </a>
-
-            <a href="estoque.php">
-                <i data-lucide="boxes"></i>
-                <span>Estoque</span>
-            </a>
-
-            <a href="orcamentos.php" class="ativo">
-                <i data-lucide="file-text"></i>
-                <span>Orçamentos</span>
-            </a>
-
-            <a href="relatorios.php">
-                <i data-lucide="chart-no-axes-column"></i>
-                <span>Relatórios</span>
-            </a>
-        </nav>
-
-        <div class="sidebar-rodape">
-            <span class="status-bolinha"></span>
-
-            <div>
-                <p>Sistema operacional</p>
-                <small>AutoPeças Gestão</small>
-            </div>
-        </div>
-    </aside>
-
-    <main class="conteudo">
-
-        <section class="painel-controle">
-            <div class="painel-texto">
-                <span class="painel-etiqueta">GESTÃO COMERCIAL</span>
-
-                <h2>Orçamentos</h2>
-
-                <p>
-                    Consulte e acompanhe os orçamentos dos seus clientes,
-                    confira valores e gerencie as situações de cada registro.
-                </p>
-            </div>
-
-        </section>
-
-        <section class="resumo-orcamentos">
-
-            <article class="resumo-card">
-                <div class="resumo-topo">
-                    <p>Total de orçamentos</p>
-
-                    <span class="resumo-icone azul">
-                        <i data-lucide="files"></i>
-                    </span>
-                </div>
-
-                <h3 id="totalOrcamentos">0</h3>
-            </article>
-
-            <article class="resumo-card">
-                <div class="resumo-topo">
-                    <p>Orçamentos pendentes</p>
-
-                    <span class="resumo-icone laranja">
-                        <i data-lucide="clock-3"></i>
-                    </span>
-                </div>
-
-                <h3 id="totalPendentes">0</h3>
-            </article>
-
-            <article class="resumo-card">
-                <div class="resumo-topo">
-                    <p>Valor total cadastrado</p>
-
-                    <span class="resumo-icone verde">
-                        <i data-lucide="wallet"></i>
-                    </span>
-                </div>
-
-                <h3 id="valorTotal">R$ 0,00</h3>
-            </article>
-
-        </section>
-
-        <section class="secao">
-            <div class="secao-cabecalho">
-                <div>
-                    <h2 class="titulo-com-icone">
-                        <i data-lucide="clipboard-list"></i>
-                        Lista de orçamentos
-                    </h2>
-
-                    <p>Pesquise, consulte, edite ou exclua registros.</p>
-                </div>
-
-                <a
-                    href="novo-orcamento.php"
-                    class="botao botao-principal botao-com-icone"
-                >
-                    <i data-lucide="plus"></i>
-                    Novo orçamento
-                </a>
-            </div>
-
-            <div class="filtros-orcamento">
-                <input
-                    type="search"
-                    id="pesquisa"
-                    aria-label="Pesquisar orçamento"
-                    placeholder="Pesquisar por número ou cliente..."
-                >
-
-                <select id="filtroStatus" aria-label="Filtrar por situação">
-                    <option value="">Todas as situações</option>
-                    <option value="Pendente">Pendente</option>
-                    <option value="Aprovado">Aprovado</option>
-                    <option value="Recusado">Recusado</option>
-                    <option value="Vencido">Vencido</option>
-                </select>
-            </div>
-
-            <div class="tabela-container">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Número</th>
-                            <th>Cliente</th>
-                            <th>Data</th>
-                            <th>Validade</th>
-                            <th>Valor total</th>
-                            <th>Situação</th>
-                            <th>Ações</th>
-                        </tr>
-                    </thead>
-
-                    <tbody id="listaOrcamentos"></tbody>
-                </table>
-            </div>
-
-            <p
-                id="mensagemVazia"
-                class="vazio"
-                aria-live="polite"
-                hidden
-            >
-                Nenhum orçamento encontrado.
-            </p>
-        </section>
-
-        <footer class="rodape">
-            <span>AutoPeças Gestão</span>
-            <span>Controle de orçamentos</span>
-        </footer>
-
-    </main>
-
-    <script>
-        const CHAVE = "autopecas_orcamentos";
-
-        function carregarOrcamentos() {
-            try {
-                const dados = JSON.parse(localStorage.getItem(CHAVE));
-                return Array.isArray(dados) ? dados : [];
-            } catch (erro) {
-                console.error("Erro ao carregar os orçamentos:", erro);
-                return [];
-            }
-        }
-
-        function salvarOrcamentos(lista) {
-            try {
-                localStorage.setItem(CHAVE, JSON.stringify(lista));
-                return true;
-            } catch (erro) {
-                alert("Não foi possível salvar os dados no navegador.");
-                console.error("Erro ao salvar os orçamentos:", erro);
-                return false;
-            }
-        }
-
-        function moeda(valor) {
-            return Number(valor || 0).toLocaleString("pt-BR", {
-                style: "currency",
-                currency: "BRL"
-            });
-        }
-
-        function escapar(texto) {
-            return String(texto ?? "").replace(/[&<>"']/g, caractere => ({
-                "&": "&amp;",
-                "<": "&lt;",
-                ">": "&gt;",
-                '"': "&quot;",
-                "'": "&#39;"
-            })[caractere]);
-        }
-
-        function classeStatus(status) {
-            return {
-                "Pendente": "pendente",
-                "Aprovado": "aprovado",
-                "Recusado": "recusado",
-                "Vencido": "vencido"
-            }[status] || "pendente";
-        }
-
-        function renderizar() {
-            const orcamentos = carregarOrcamentos();
-
-            const pesquisa = document.getElementById("pesquisa")
-                .value.trim().toLocaleLowerCase("pt-BR");
-
-            const filtro = document.getElementById("filtroStatus").value;
-
-            const filtrados = orcamentos.filter(orcamento => {
-                const texto =
-                    `${orcamento.numero ?? ""} ${orcamento.cliente ?? ""}`
-                    .toLocaleLowerCase("pt-BR");
-
-                return texto.includes(pesquisa) &&
-                    (!filtro || orcamento.status === filtro);
-            });
-
-            document.getElementById("totalOrcamentos").textContent =
-                orcamentos.length;
-
-            document.getElementById("totalPendentes").textContent =
-                orcamentos.filter(
-                    orcamento => orcamento.status === "Pendente"
-                ).length;
-
-            const somaTotal = orcamentos.reduce(
-                (soma, orcamento) =>
-                    soma + Number(orcamento.total || 0),
-                0
-            );
-
-            document.getElementById("valorTotal").textContent =
-                moeda(somaTotal);
-
-        
-            const corpo = document.getElementById("listaOrcamentos");
-
-            corpo.innerHTML = filtrados.map(orcamento => `
-                <tr>
-                    <td>${escapar(orcamento.numero || "-")}</td>
-                    <td>${escapar(orcamento.cliente || "-")}</td>
-                    <td>${escapar(orcamento.data || "-")}</td>
-                    <td>${escapar(orcamento.validade || "-")}</td>
-                    <td>${moeda(orcamento.total)}</td>
-
-                    <td>
-                        <span class="status-orcamento ${classeStatus(orcamento.status)}">
-                            ${escapar(orcamento.status || "Pendente")}
-                        </span>
-                    </td>
-
-                    <td>
-                        <div class="acoes-tabela">
-                            <button
-                                type="button"
-                                class="botao-pequeno"
-                                data-editar="${escapar(orcamento.id)}"
-                                aria-label="Editar orçamento ${escapar(orcamento.numero || "")}"
-                            >
-                                <i data-lucide="pencil"></i>
-                                Editar
-                            </button>
-
-                            <button
-                                type="button"
-                                class="botao-pequeno botao-excluir"
-                                data-excluir="${escapar(orcamento.id)}"
-                                aria-label="Excluir orçamento ${escapar(orcamento.numero || "")}"
-                            >
-                                <i data-lucide="trash-2"></i>
-                                Excluir
-                            </button>
-                        </div>
-                    </td>
-                </tr>
-            `).join("");
-
-            document.getElementById("mensagemVazia").hidden =
-                filtrados.length !== 0;
-
-    
-            lucide.createIcons();
-        }
-
-  
-        document.getElementById("pesquisa")
-            .addEventListener("input", renderizar);
-
-     
-        document.getElementById("filtroStatus")
-            .addEventListener("change", renderizar);
-
-
-        document.getElementById("listaOrcamentos")
-            .addEventListener("click", event => {
-                const editar = event.target.closest("[data-editar]");
-                const excluir = event.target.closest("[data-excluir]");
-
-                if (editar) {
-                    const id = editar.dataset.editar;
-
-                    window.location.href =
-                        "novo-orcamento.php?id=" +
-                        encodeURIComponent(id);
-
-                    return;
-                }
-
-                if (excluir) {
-                    const id = excluir.dataset.excluir;
-
-                    if (!confirm(
-                        "Deseja realmente excluir este orçamento?"
-                    )) {
-                        return;
-                    }
-
-                    const atualizados = carregarOrcamentos()
-                        .filter(orcamento =>
-                            String(orcamento.id) !== String(id)
-                        );
-
-                    if (salvarOrcamentos(atualizados)) {
-                        renderizar();
-                    }
-                }
-            });
-
-        
-        renderizar();
-        lucide.createIcons();
-    </script>
-
-</body>
-</html>
-```
+.botao-botao {display:inline-block;padding:9px 13px;border-radius:7px; text-decoration:none;}
+.confirmar {background:#fff2e5; padding:15px; margin:18px 0; border-radius:10px;}
+.filtros-orcamento {align-items:center;flex-wrap:wrap;}
+</style></head><body><aside class="sidebar"><div class="logo"><div class="logo-icon">A</div><div><h2>Auto<span>Peças</span></h2><small>Sistema de Gestão</small></div></div>
+<p class="menu-titulo">MENU PRINCIPAL</p><nav class="menu">
+<a href="index.php">Dashboard</a><a href="clientes.php">Clientes</a><a href="veiculos.php">Veículos</a><a href="produtos.php">Produtos</a><a href="estoque.php">Estoque</a><a href="orcamentos.php" class="ativo">Orçamentos</a><a href="relatorios.php">Relatórios</a>
+</nav><div class="sidebar-rodape"><span class="status-bolinha"></span><span>Sistema operacional</span></div></aside>
+<main class="conteudo"><section class="painel-controle"><div class="painel-texto"><span class="painel-etiqueta">GESTÃO COMERCIAL</span><h2>Orçamentos</h2><p>Registros e valores reais do Oracle FreeSQL.</p></div></section>
+<?php if ($erro): ?><div class="confirmar" role="alert"><?= axH($erro) ?></div><?php endif; ?>
+<?php if (isset($_GET['ok'])): ?><p role="status">Operação confirmada no Oracle FreeSQL.</p><?php endif; ?>
+<section class="resumo-orcamentos">
+<article class="resumo-card"><p>Total de orçamentos</p><h3><?= $total ?></h3></article>
+<article class="resumo-card"><p>Pendentes</p><h3><?= $pendentes ?></h3></article>
+<article class="resumo-card"><p>Valor total cadastrado</p><h3><?= axMoney($valorTotal) ?></h3></article>
+</section>
+<?php if ($confirmarId): ?>
+<section class="confirmar"><h2>Confirmar exclusão</h2><p>A exclusão do orçamento #<?= (int)$confirmarId ?> e de seus itens será definitiva.</p>
+<form method="post" action="orcamentos.php">
+<input type="hidden" name="csrf" value="<?= axH(axCsrf()) ?>"><input type="hidden" name="acao" value="excluir"><input type="hidden" name="id" value="<?= (int)$confirmarId ?>">
+<button type="submit" class="botao botao-principal">Sim, excluir</button> <a href="orcamentos.php" class="botao botao-secundario">Cancelar</a></form></section>
+<?php endif; ?>
+<section class="secao"><div class="secao-cabecalho"><div><h2>Lista de orçamentos</h2><p>Consulte, edite e altere situações.</p></div><a href="novo-orcamento.php" class="botao botao-principal">Novo orçamento</a></div>
+<form class="filtros-orcamento" method="get" action="orcamentos.php">
+<input type="search" name="busca" value="<?= axH($busca) ?>" placeholder="Número ou nome do cliente" aria-label="Buscar orçamento">
+<select name="status" aria-label="Filtrar situação"><option value="">Todas as situações</option>
+<?php foreach (['PENDENTE'=>'Pendente','APROVADO'=>'Aprovado','RECUSADO'=>'Recusado','CANCELADO'=>'Cancelado','VENCIDO'=>'Vencido'] as $codigo=>$rotulo): ?>
+<option value="<?= $codigo ?>" <?= $statusFiltro===$codigo?'selected':'' ?>><?= $rotulo ?></option><?php endforeach; ?></select>
+<button type="submit" class="botao botao-principal">Filtrar</button><a href="orcamentos.php" class="botao botao-secundario">Limpar</a></form>
+<div class="tabela-container"><table><thead><tr><th>Número</th><th>Cliente</th><th>Data</th><th>Validade</th><th>Valor total</th><th>Situação</th><th>Ações</th></tr></thead><tbody>
+<?php foreach ($orcamentos as $o): ?>
+<tr><td>#<?= (int)$o['ID_ORCAMENTO'] ?></td><td><?= axH($o['CLIENTE']) ?></td><td><?= axH($o['DATA_BR']) ?></td><td><?= axH($o['VALIDADE_BR'] ?? '—') ?></td>
+<td><?= axMoney($o['VALOR_TOTAL']) ?></td>
+<td><span class="status-orcamento <?= axH(strtolower((string)$o['STATUS'])) ?>"><?= axH($o['SITUACAO']) ?></span></td>
+<td><div class="acoes-tabela"><a class="botao-pequeno" href="novo-orcamento.php?editar=<?= (int)$o['ID_ORCAMENTO'] ?>">Editar</a>
+<a class="botao-pequeno botao-excluir" href="orcamentos.php?excluir=<?= (int)$o['ID_ORCAMENTO'] ?>">Excluir</a></div>
+<form method="post" action="orcamentos.php" style="display:flex;gap:5px;margin-top:8px;align-items:center;">
+<input type="hidden" name="csrf" value="<?= axH(axCsrf()) ?>"><input type="hidden" name="acao" value="alterar_status"><input type="hidden" name="id" value="<?= (int)$o['ID_ORCAMENTO'] ?>">
+<select name="status" aria-label="Alterar status"><option value="PENDENTE" <?= $o['STATUS']==='PENDENTE'?'selected':'' ?>>Pendente</option>
+<option value="APROVADO" <?= $o['STATUS']==='APROVADO'?'selected':'' ?>>Aprovado</option>
+<option value="RECUSADO" <?= $o['STATUS']==='RECUSADO'?'selected':'' ?>>Recusado</option>
+<option value="CANCELADO" <?= $o['STATUS']==='CANCELADO'?'selected':'' ?>>Cancelado</option></select>
+<button type="submit" class="botao-pequeno">Salvar status</button></form></td></tr>
+<?php endforeach; ?>
+<?php if (!$orcamentos): ?><tr><td colspan="7" class="vazio">Nenhum orçamento encontrado.</td></tr><?php endif; ?>
+</tbody></table></div>
+<p class="vazio">Exibindo <?= count($orcamentos) ?> de <?= $total ?> orçamento(s).</p>
+</section><footer class="rodape">AutoMax-Peças · Gestão comercial</footer></main></body></html>

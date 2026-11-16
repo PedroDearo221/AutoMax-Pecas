@@ -1,0 +1,23 @@
+
+# Script administrativo local
+/database/criar_admin.php
+
+# Credenciais e configuracoes locais
+/.env
+/.env.*
+!/.env.example
+/conexao.php
+/config.local.php
+/automax_private/
+
+# Backups e arquivos temporarios
+/backups/
+*.bak
+*.log
+*.tmp
+
+# Dependencias e arquivos do editor
+/vendor/
+/node_modules/
+/.vscode/
+/.idea/

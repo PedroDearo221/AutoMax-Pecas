@@ -1,4 +1,6 @@
 <?php
+require_once __DIR__ . '/automax.php';
+axRequireLogin();
 // Dashboard de relatórios: somente leitura. Nenhuma alteração no banco.
 require_once dirname(__DIR__, 2) . '/automax_private/conexao.php';
 
@@ -26,6 +28,9 @@ function consultar($conn, string $sql): array {
 $erroPagina = null;
 $totais = ['CLIENTES'=>0,'PRODUTOS'=>0,'VEICULOS'=>0,'CATEGORIAS'=>0];
 $produtos = []; $porCategoria = []; $porMarca = []; $veiculos = [];
+$estoque = []; $orcamentos = [];
+$totaisExtra = ['UNIDADES'=>0,'SEM_CADASTRO'=>0,'ALERTAS'=>0,'ORCAMENTOS'=>0,'VALOR_ORCAMENTOS'=>0];
+$buscaProduto = mb_substr(trim((string)($_GET['busca_produto'] ?? '')),0,100);
 $conn = null;
 try {
     $conn = conexaoOracle();
@@ -48,6 +53,26 @@ try {
     $veiculos = consultar($conn, "SELECT V.PLACA,V.MARCA,V.MODELO,V.ANO,C.NOME AS CLIENTE
         FROM VEICULO V JOIN CLIENTE C ON V.ID_CLIENTE=C.ID_CLIENTE
         ORDER BY C.NOME,V.MARCA,V.MODELO");
+    $resumo = consultar($conn, "SELECT
+        (SELECT NVL(SUM(QUANTIDADE),0) FROM ESTOQUE) AS UNIDADES,
+        (SELECT COUNT(*) FROM PRODUTO P LEFT JOIN ESTOQUE E ON E.ID_PRODUTO=P.ID_PRODUTO WHERE E.ID_ESTOQUE IS NULL) AS SEM_CADASTRO,
+        (SELECT COUNT(*) FROM VW_ESTOQUE_BAIXO) AS ALERTAS,
+        (SELECT COUNT(*) FROM ORCAMENTO) AS ORCAMENTOS,
+        (SELECT NVL(SUM(VALOR_TOTAL),0) FROM ORCAMENTO) AS VALOR_ORCAMENTOS
+        FROM DUAL");
+    if ($resumo) $totaisExtra=$resumo[0];
+    $estoque = consultar($conn, "SELECT P.CODIGO, P.NOME AS PRODUTO, P.ESTOQUE_MINIMO, E.QUANTIDADE,
+        CASE WHEN E.ID_ESTOQUE IS NULL THEN 'NÃO CADASTRADO'
+             WHEN E.QUANTIDADE=0 THEN 'ESGOTADO'
+             WHEN E.QUANTIDADE<=P.ESTOQUE_MINIMO THEN 'BAIXO' ELSE 'DISPONÍVEL' END AS SITUACAO
+        FROM PRODUTO P LEFT JOIN ESTOQUE E ON E.ID_PRODUTO=P.ID_PRODUTO ORDER BY P.NOME");
+    $orcamentos = consultar($conn, "SELECT ID_ORCAMENTO,NOME_CLIENTE,DATA_ORCAMENTO,STATUS,VALOR_TOTAL
+        FROM VW_ORCAMENTOS_COMPLETOS ORDER BY ID_ORCAMENTO DESC FETCH FIRST 20 ROWS ONLY");
+    if ($buscaProduto !== '') {
+        $produtos = array_values(array_filter($produtos, static function($p) use ($buscaProduto): bool {
+            return mb_stripos(implode(' ', [(string)$p['CODIGO'],(string)$p['NOME'],(string)$p['CATEGORIA'],(string)$p['MARCA']]),$buscaProduto,0,'UTF-8')!==false;
+        }));
+    }
 } catch (Throwable $e) {
     error_log('AutoMax relatórios: ' . $e->getMessage());
     $erroPagina = 'Não foi possível carregar os relatórios do Oracle FreeSQL. Verifique a conexão.';
@@ -63,10 +88,10 @@ try {
     <title>Relatórios | AutoPeças</title>
 
     <link rel="stylesheet" href="css/estilo.css">
-    <script src="https://unpkg.com/lucide@latest"></script>
+
 
     <style>
-  
+
         .menu a {
             display: flex;
             align-items: center;
@@ -228,7 +253,7 @@ try {
             color: #7953c7;
         }
 
-    
+
         .relatorio-grafico {
             display: grid;
             grid-template-columns: minmax(0, 1.4fr) minmax(260px, 1fr);
@@ -243,7 +268,7 @@ try {
     padding: 20px 4px 0;
     min-height: 0;
 }
-        
+
 
         .barra-linha {
             display: grid;
@@ -280,7 +305,7 @@ try {
             overflow-wrap: anywhere;
         }
 
-    
+
         .status-resumo {
             display: flex;
             justify-content: space-between;
@@ -331,7 +356,7 @@ try {
             color: #202936;
         }
 
-    
+
         .tabela-container {
             width: 100%;
             overflow-x: auto;
@@ -501,7 +526,8 @@ try {
         tr[hidden] { display: none !important; }
         .relatorio-lista { margin-top: 24px; }
         .aviso-pendente { color:#6b7280; padding:12px 0; }
-    </style>
+     .icone-sem-js {display:inline-block; min-width:1.05em; font-size:1.1em; font-weight:700; line-height:1; vertical-align:middle;}
+</style>
 </head>
 
 <body>
@@ -520,37 +546,37 @@ try {
 
         <nav class="menu">
             <a href="index.php">
-                <i data-lucide="layout-dashboard"></i>
+                <span class="icone-sem-js" aria-hidden="true">▦</span>
                 <span>Dashboard</span>
             </a>
 
             <a href="clientes.php">
-                <i data-lucide="users-round"></i>
+                <span class="icone-sem-js" aria-hidden="true">♧</span>
                 <span>Clientes</span>
             </a>
 
             <a href="veiculos.php">
-                <i data-lucide="car-front"></i>
+                <span class="icone-sem-js" aria-hidden="true">▱</span>
                 <span>Veículos</span>
             </a>
 
             <a href="produtos.php">
-                <i data-lucide="package"></i>
+                <span class="icone-sem-js" aria-hidden="true">▣</span>
                 <span>Produtos</span>
             </a>
 
             <a href="estoque.php">
-                <i data-lucide="boxes"></i>
+                <span class="icone-sem-js" aria-hidden="true">▤</span>
                 <span>Estoque</span>
             </a>
 
             <a href="orcamentos.php">
-                <i data-lucide="file-text"></i>
+                <span class="icone-sem-js" aria-hidden="true">≡</span>
                 <span>Orçamentos</span>
             </a>
 
             <a href="relatorios.php" class="ativo">
-                <i data-lucide="chart-no-axes-column"></i>
+                <span class="icone-sem-js" aria-hidden="true">▥</span>
                 <span>Relatórios</span>
             </a>
         </nav>
@@ -577,8 +603,8 @@ try {
   <div class="relatorios-topo">
     <div><h2>Visão geral</h2><p>Dados reais do banco AutoMax-Peças.</p></div>
     <div class="relatorios-acoes">
-      <button type="button" class="botao botao-secundario botao-com-icone" id="atualizar"><i data-lucide="refresh-cw"></i>Atualizar</button>
-      <button type="button" class="botao botao-principal botao-com-icone" id="imprimir"><i data-lucide="printer"></i>Imprimir relatório</button>
+      <a href="relatorios.php" class="botao botao-secundario botao-com-icone">Atualizar</a>
+      <span class="texto-secundario">Para imprimir: Ctrl + P</span>
     </div>
   </div>
   <?php if ($erroPagina): ?>
@@ -586,17 +612,17 @@ try {
   <?php endif; ?>
 
   <section class="cards-relatorio">
-    <article class="card-relatorio"><div class="card-icone icone-laranja"><i data-lucide="users-round"></i></div><div class="card-titulo">Clientes cadastrados</div><div class="card-valor"><?= h($erroPagina ? '—' : $totais['CLIENTES']) ?></div><div class="card-descricao">Registros em CLIENTE</div></article>
-    <article class="card-relatorio"><div class="card-icone icone-azul"><i data-lucide="package"></i></div><div class="card-titulo">Produtos cadastrados</div><div class="card-valor"><?= h($erroPagina ? '—' : $totais['PRODUTOS']) ?></div><div class="card-descricao">Registros em PRODUTO</div></article>
-    <article class="card-relatorio"><div class="card-icone icone-verde"><i data-lucide="car-front"></i></div><div class="card-titulo">Veículos cadastrados</div><div class="card-valor"><?= h($erroPagina ? '—' : $totais['VEICULOS']) ?></div><div class="card-descricao">Registros em VEICULO</div></article>
-    <article class="card-relatorio"><div class="card-icone icone-roxo"><i data-lucide="tags"></i></div><div class="card-titulo">Categorias cadastradas</div><div class="card-valor"><?= h($erroPagina ? '—' : $totais['CATEGORIAS']) ?></div><div class="card-descricao">Registros em CATEGORIA</div></article>
+    <article class="card-relatorio"><div class="card-icone icone-laranja"><span class="icone-sem-js" aria-hidden="true">♧</span></div><div class="card-titulo">Clientes cadastrados</div><div class="card-valor"><?= h($erroPagina ? '—' : $totais['CLIENTES']) ?></div><div class="card-descricao">Registros em CLIENTE</div></article>
+    <article class="card-relatorio"><div class="card-icone icone-azul"><span class="icone-sem-js" aria-hidden="true">▣</span></div><div class="card-titulo">Produtos cadastrados</div><div class="card-valor"><?= h($erroPagina ? '—' : $totais['PRODUTOS']) ?></div><div class="card-descricao">Registros em PRODUTO</div></article>
+    <article class="card-relatorio"><div class="card-icone icone-verde"><span class="icone-sem-js" aria-hidden="true">▱</span></div><div class="card-titulo">Veículos cadastrados</div><div class="card-valor"><?= h($erroPagina ? '—' : $totais['VEICULOS']) ?></div><div class="card-descricao">Registros em VEICULO</div></article>
+    <article class="card-relatorio"><div class="card-icone icone-roxo"><span class="icone-sem-js" aria-hidden="true">•</span></div><div class="card-titulo">Categorias cadastradas</div><div class="card-valor"><?= h($erroPagina ? '—' : $totais['CATEGORIAS']) ?></div><div class="card-descricao">Registros em CATEGORIA</div></article>
   </section>
 
   <section class="relatorio-grafico">
     <div class="secao">
-      <div class="secao-cabecalho"><div><h2 class="titulo-com-icone"><i data-lucide="chart-no-axes-column"></i>Produtos por categoria</h2><p>Quantidade de produtos cadastrados por categoria.</p></div></div>
+      <div class="secao-cabecalho"><div><h2 class="titulo-com-icone"><span class="icone-sem-js" aria-hidden="true">▥</span>Produtos por categoria</h2><p>Quantidade de produtos cadastrados por categoria.</p></div></div>
       <div class="grafico-area">
-        <?php $maiorCat = max(1, ...array_map(fn($v)=>(int)$v['TOTAL'], $porCategoria)); ?>
+        <?php $maiorCat = max(array_merge([1], array_map(fn($v)=>(int)$v['TOTAL'], $porCategoria))); ?>
         <?php foreach ($porCategoria as $r): ?>
           <div class="barra-linha"><span class="barra-label"><?= h($r['CATEGORIA']) ?></span><div class="barra-fundo"><div class="barra-preenchida" style="width:<?= round(100*(int)$r['TOTAL']/$maiorCat,2) ?>%"></div></div><span class="barra-valor"><?= (int)$r['TOTAL'] ?></span></div>
         <?php endforeach; ?>
@@ -604,7 +630,7 @@ try {
       </div>
     </div>
     <div class="secao">
-      <div class="secao-cabecalho"><div><h2 class="titulo-com-icone"><i data-lucide="tag"></i>Produtos por marca</h2><p>Distribuição do catálogo por fabricante.</p></div></div>
+      <div class="secao-cabecalho"><div><h2 class="titulo-com-icone"><span class="icone-sem-js" aria-hidden="true">•</span>Produtos por marca</h2><p>Distribuição do catálogo por fabricante.</p></div></div>
       <?php foreach ($porMarca as $r): ?>
         <div class="status-resumo"><div class="status-nome"><span class="status-ponto ponto-aprovado"></span><?= h($r['MARCA']) ?></div><strong class="status-quantidade"><?= (int)$r['TOTAL'] ?></strong></div>
       <?php endforeach; ?>
@@ -613,11 +639,14 @@ try {
   </section>
 
   <section class="secao relatorio-lista">
-    <div class="secao-cabecalho"><div><h2 class="titulo-com-icone"><i data-lucide="package"></i>Catálogo de produtos</h2><p>Preços, categorias e marcas cadastrados no Oracle.</p></div></div>
-    <div class="filtros-relatorio" style="grid-template-columns: minmax(220px, 1fr); max-width:500px; margin-bottom:16px">
-      <div class="campo"><label for="buscaProdutos">Pesquisar produtos</label><input type="search" id="buscaProdutos" placeholder="Código, nome, categoria ou marca..."></div>
-    </div>
-    <p id="resultadoProdutos" class="resultado-busca" aria-live="polite"></p>
+    <div class="secao-cabecalho"><div><h2 class="titulo-com-icone"><span class="icone-sem-js" aria-hidden="true">▣</span>Catálogo de produtos</h2><p>Preços, categorias e marcas cadastrados no Oracle.</p></div></div>
+    <form class="filtros-relatorio" method="get" action="relatorios.php" style="grid-template-columns:minmax(220px,1fr) auto auto;max-width:640px;margin-bottom:16px">
+      <div class="campo"><label for="buscaProdutos">Pesquisar produtos</label>
+        <input type="search" id="buscaProdutos" name="busca_produto" value="<?= h($buscaProduto) ?>" placeholder="Código, nome, categoria ou marca..."></div>
+      <button type="submit" class="botao botao-principal">Pesquisar</button>
+      <a href="relatorios.php" class="botao botao-secundario">Limpar</a>
+    </form>
+    <p id="resultadoProdutos" class="resultado-busca" aria-live="polite">Exibindo <?= count($produtos) ?> produto(s).</p>
     <div class="tabela-container"><table id="tabelaProdutos"><thead><tr><th>Código</th><th>Produto</th><th>Categoria</th><th>Marca</th><th>Preço</th></tr></thead><tbody>
       <?php foreach ($produtos as $p): ?>
       <tr data-pesquisa="<?= h(implode(' ', [$p['CODIGO'],$p['NOME'],$p['CATEGORIA'],$p['MARCA']])) ?>"><td><?= h($p['CODIGO']) ?></td><td><?= h($p['NOME']) ?></td><td><?= h($p['CATEGORIA']) ?></td><td><?= h($p['MARCA']) ?></td><td><?= h(moeda($p['PRECO'])) ?></td></tr>
@@ -627,7 +656,7 @@ try {
   </section>
 
   <section class="secao relatorio-lista">
-    <div class="secao-cabecalho"><div><h2 class="titulo-com-icone"><i data-lucide="car-front"></i>Veículos por cliente</h2><p>Relacionamento entre os veículos e seus proprietários cadastrados.</p></div></div>
+    <div class="secao-cabecalho"><div><h2 class="titulo-com-icone"><span class="icone-sem-js" aria-hidden="true">▱</span>Veículos por cliente</h2><p>Relacionamento entre os veículos e seus proprietários cadastrados.</p></div></div>
     <div class="tabela-container"><table><thead><tr><th>Cliente</th><th>Placa</th><th>Marca</th><th>Modelo</th><th>Ano</th></tr></thead><tbody>
       <?php foreach ($veiculos as $v): ?>
         <tr><td><?= h($v['CLIENTE']) ?></td><td><?= h($v['PLACA']) ?></td><td><?= h($v['MARCA']) ?></td><td><?= h($v['MODELO']) ?></td><td><?= h($v['ANO']) ?></td></tr>
@@ -637,29 +666,32 @@ try {
   </section>
 
   <section class="secao relatorio-lista">
-    <div class="secao-cabecalho"><div><h2 class="titulo-com-icone"><i data-lucide="clock"></i>Relatórios pendentes</h2><p>Disponíveis quando os módulos restantes forem implementados.</p></div></div>
-    <div class="mensagem-info">Estoque e orçamentos ainda não possuem tabelas implementadas no FreeSQL. Por isso, não exibimos quantidades ou valores fictícios.</div>
+    <div class="secao-cabecalho"><div><h2 class="titulo-com-icone">Estoque atual</h2>
+      <p>Quantidades registradas e situações calculadas a partir do estoque mínimo.</p></div></div>
+    <div class="cards-relatorio">
+      <article class="card-relatorio"><div class="card-titulo">Unidades cadastradas</div><div class="card-valor"><?= h($totaisExtra['UNIDADES']) ?></div></article>
+      <article class="card-relatorio"><div class="card-titulo">Alertas de estoque</div><div class="card-valor"><?= h($totaisExtra['ALERTAS']) ?></div></article>
+      <article class="card-relatorio"><div class="card-titulo">Sem quantidade informada</div><div class="card-valor"><?= h($totaisExtra['SEM_CADASTRO']) ?></div></article>
+      <article class="card-relatorio"><div class="card-titulo">Orçamentos registrados</div><div class="card-valor"><?= h($totaisExtra['ORCAMENTOS']) ?></div></article>
+    </div>
+    <div class="tabela-container"><table><thead><tr><th>Código</th><th>Produto</th><th>Quantidade</th><th>Mínimo</th><th>Situação</th></tr></thead><tbody>
+      <?php foreach ($estoque as $p): ?><tr><td><?= h($p['CODIGO']) ?></td><td><?= h($p['PRODUTO']) ?></td>
+        <td><?= $p['QUANTIDADE'] === null ? '—' : (int)$p['QUANTIDADE'] ?></td><td><?= (int)$p['ESTOQUE_MINIMO'] ?></td>
+        <td><?= h($p['SITUACAO']) ?></td></tr><?php endforeach; ?>
+      <?php if (!$estoque): ?><tr><td colspan="5">Nenhum produto cadastrado.</td></tr><?php endif; ?>
+    </tbody></table></div>
+  </section>
+  <section class="secao relatorio-lista">
+    <div class="secao-cabecalho"><div><h2>Orçamentos recentes</h2>
+      <p>Total cadastrado: <?= axMoney($totaisExtra['VALOR_ORCAMENTOS']) ?>.</p></div></div>
+    <div class="tabela-container"><table><thead><tr><th>Número</th><th>Cliente</th><th>Data</th><th>Status</th><th>Valor</th></tr></thead><tbody>
+      <?php foreach ($orcamentos as $o): ?><tr><td>#<?= (int)$o['ID_ORCAMENTO'] ?></td><td><?= h($o['NOME_CLIENTE']) ?></td>
+        <td><?= h($o['DATA_ORCAMENTO']) ?></td><td><?= h($o['STATUS']) ?></td><td><?= axMoney($o['VALOR_TOTAL']) ?></td></tr><?php endforeach; ?>
+      <?php if (!$orcamentos): ?><tr><td colspan="5">Nenhum orçamento cadastrado.</td></tr><?php endif; ?>
+    </tbody></table></div>
   </section>
   <div class="rodape-relatorio"><span>Relatório de consulta — sem alterações no banco</span><span>Gerado em <?= h(date('d/m/Y H:i')) ?></span></div>
     </main>
-    <script>
-      if (window.lucide) lucide.createIcons();
-      document.getElementById('atualizar').addEventListener('click', () => location.reload());
-      document.getElementById('imprimir').addEventListener('click', () => window.print());
-      const busca = document.getElementById('buscaProdutos');
-      const linhas = [...document.querySelectorAll('#tabelaProdutos tbody tr[data-pesquisa]')];
-      const filtrar = () => {
-        const q = busca.value.trim().toLocaleLowerCase('pt-BR');
-        let n = 0;
-        linhas.forEach(linha => {
-          const ok = linha.dataset.pesquisa.toLocaleLowerCase('pt-BR').includes(q);
-          linha.hidden = !ok;
-          if (ok) n++;
-        });
-        document.getElementById('resultadoProdutos').textContent = `${n} produto(s) encontrado(s)`;
-      };
-      busca.addEventListener('input', filtrar);
-      filtrar();
-    </script>
+
 </body>
 </html>

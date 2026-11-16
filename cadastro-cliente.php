@@ -1,11 +1,38 @@
-<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Criar conta | AutoPeças</title>
-
-    <style>
+<?php
+declare(strict_types=1);
+require_once __DIR__ . '/automax.php';
+axRequireAdmin();
+$erro=''; $ok='';
+if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
+    $conn=null;
+    try {
+        axCheckCsrf();
+        $nome=trim((string)($_POST['nome'] ?? ''));
+        $email=mb_strtolower(trim((string)($_POST['email'] ?? '')));
+        $tipo=(string)($_POST['tipo'] ?? 'VENDEDOR');
+        $senha=(string)($_POST['senha'] ?? '');
+        $confirmar=(string)($_POST['confirmar'] ?? '');
+        if ($nome==='' || mb_strlen($nome)>100) throw new RuntimeException('Informe um nome de até 100 caracteres.');
+        if (!filter_var($email,FILTER_VALIDATE_EMAIL) || mb_strlen($email)>100) throw new RuntimeException('E-mail inválido.');
+        if (!in_array($tipo,['ADMIN','GERENTE','VENDEDOR'],true)) throw new RuntimeException('Tipo de usuário inválido.');
+        if (strlen($senha)<12 || strlen($senha)>72 || $senha!==$confirmar) throw new RuntimeException('Use de 12 a 72 caracteres e confirme a mesma senha.');
+        $conn=axConn();
+        $ja=axQuery($conn,'SELECT COUNT(*) AS TOTAL FROM USUARIO WHERE LOWER(EMAIL)=:email',['email'=>$email]);
+        if ((int)$ja[0]['TOTAL']!==0) throw new RuntimeException('E-mail já cadastrado.');
+        axRun($conn, "INSERT INTO USUARIO (ID_USUARIO,NOME,EMAIL,SENHA,TIPO,ATIVO) VALUES (SEQ_AUTOMAX_USUARIO.NEXTVAL,:nome,:email,:senha,:tipo,'S')", [
+            'nome'=>$nome,'email'=>$email,'senha'=>password_hash($senha,PASSWORD_DEFAULT),'tipo'=>$tipo
+        ]);
+        if (!oci_commit($conn)) throw new RuntimeException('Não foi possível confirmar o cadastro.');
+        $ok='Usuário criado com sucesso.';
+    } catch (Throwable $e) {
+        if ($conn) oci_rollback($conn);
+        error_log('AutoMax usuarios: '.$e->getMessage());
+        $erro = $e instanceof RuntimeException ? $e->getMessage() : 'Erro ao cadastrar usuário.';
+    } finally { if ($conn) oci_close($conn); }
+}
+?>
+<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Novo usuário | AutoMax-Peças</title><style>
         * {
             margin: 0;
             padding: 0;
@@ -256,380 +283,26 @@
                 font-size: 24px;
             }
         }
-    </style>
-</head>
 
-<body>
-
-    <header class="logo">
-        <div class="logo-icone">A</div>
-        <div>
-            <h1>Auto<span>Peças</span></h1>
-            <small>GESTÃO AUTOMOTIVA</small>
-        </div>
-    </header>
-
-    <main class="container">
-        <div class="cabecalho">
-            <h2>Crie sua conta</h2>
-            <p>
-                Preencha os dados abaixo para se cadastrar como cliente
-                e acessar sua área pessoal.
-            </p>
-        </div>
-
-        <div class="mensagem" id="mensagem" role="status"></div>
-
-        <form id="formCadastro">
-
-            <h3 class="secao-titulo">Dados pessoais</h3>
-
-            <div class="grade">
-                <div class="campo completo">
-                    <label for="nome">Nome completo *</label>
-                    <input
-                        type="text"
-                        id="nome"
-                        autocomplete="name"
-                        placeholder="Digite seu nome completo"
-                        required
-                        minlength="3"
-                    >
-                </div>
-
-                <div class="campo">
-                    <label for="cpf">CPF *</label>
-                    <input
-                        type="text"
-                        id="cpf"
-                        inputmode="numeric"
-                        placeholder="000.000.000-00"
-                        maxlength="14"
-                        required
-                    >
-                </div>
-
-                <div class="campo">
-                    <label for="telefone">Telefone *</label>
-                    <input
-                        type="tel"
-                        id="telefone"
-                        inputmode="tel"
-                        autocomplete="tel"
-                        placeholder="(00) 00000-0000"
-                        maxlength="15"
-                        required
-                    >
-                </div>
-
-                <div class="campo completo">
-                    <label for="email">E-mail *</label>
-                    <input
-                        type="email"
-                        id="email"
-                        autocomplete="email"
-                        placeholder="seuemail@exemplo.com"
-                        required
-                    >
-                </div>
-            </div>
-
-            <h3 class="secao-titulo">Endereço</h3>
-
-            <div class="grade">
-                <div class="campo">
-                    <label for="cep">CEP *</label>
-                    <input
-                        type="text"
-                        id="cep"
-                        inputmode="numeric"
-                        autocomplete="postal-code"
-                        placeholder="00000-000"
-                        maxlength="9"
-                        required
-                    >
-                    <small id="statusCep">Digite o CEP para buscar o endereço.</small>
-                </div>
-
-                <div class="campo">
-                    <label for="estado">Estado *</label>
-                    <input
-                        type="text"
-                        id="estado"
-                        maxlength="2"
-                        placeholder="UF"
-                        autocomplete="address-level1"
-                        required
-                    >
-                </div>
-
-                <div class="campo completo">
-                    <label for="endereco">Rua / Avenida *</label>
-                    <input
-                        type="text"
-                        id="endereco"
-                        autocomplete="address-line1"
-                        placeholder="Nome da rua ou avenida"
-                        required
-                    >
-                </div>
-
-                <div class="campo">
-                    <label for="numero">Número *</label>
-                    <input
-                        type="text"
-                        id="numero"
-                        placeholder="Número da residência"
-                        required
-                    >
-                </div>
-
-                <div class="campo">
-                    <label for="complemento">Complemento</label>
-                    <input
-                        type="text"
-                        id="complemento"
-                        placeholder="Apartamento, bloco etc."
-                    >
-                </div>
-
-                <div class="campo">
-                    <label for="bairro">Bairro *</label>
-                    <input type="text" id="bairro" required>
-                </div>
-
-                <div class="campo">
-                    <label for="cidade">Cidade *</label>
-                    <input
-                        type="text"
-                        id="cidade"
-                        autocomplete="address-level2"
-                        required
-                    >
-                </div>
-            </div>
-
-            <h3 class="secao-titulo">Dados de acesso</h3>
-
-            <div class="grade">
-                <div class="campo completo">
-                    <label for="senha">Criar senha *</label>
-
-                    <div class="senha-container">
-                        <input
-                            type="password"
-                            id="senha"
-                            autocomplete="new-password"
-                            placeholder="Crie uma senha com pelo menos 8 caracteres"
-                            minlength="8"
-                            required
-                        >
-
-                        <button
-                            type="button"
-                            class="mostrar"
-                            data-campo="senha"
-                        >
-                            Mostrar
-                        </button>
-                    </div>
-
-                    <small>Use pelo menos 8 caracteres.</small>
-                </div>
-
-                <div class="campo completo">
-                    <label for="confirmarSenha">Confirmar senha *</label>
-
-                    <div class="senha-container">
-                        <input
-                            type="password"
-                            id="confirmarSenha"
-                            autocomplete="new-password"
-                            placeholder="Digite a senha novamente"
-                            minlength="8"
-                            required
-                        >
-
-                        <button
-                            type="button"
-                            class="mostrar"
-                            data-campo="confirmarSenha"
-                        >
-                            Mostrar
-                        </button>
-                    </div>
-                </div>
-            </div>
-
-            <label class="termos">
-                <input type="checkbox" id="aceite" required>
-                <span>
-                    Confirmo que as informações fornecidas estão corretas
-                    e concordo com os termos de uso e a política de privacidade.
-                </span>
-            </label>
-
-            <button type="submit" class="botao">Criar minha conta</button>
-
-        </form>
-
-        <div class="login-link">
-            Já possui uma conta?
-            <a href="login.php">Entrar</a>
-        </div>
-
-        <a class="voltar" href="login.php">← Voltar para o login</a>
-    </main>
-
-    <script>
-        const $ = id => document.getElementById(id);
-        const form = $("formCadastro");
-        const mensagem = $("mensagem");
-        const statusCep = $("statusCep");
-
-        function mostrarMensagem(texto, sucesso = false) {
-            mensagem.textContent = texto;
-            mensagem.classList.toggle("sucesso", sucesso);
-            mensagem.style.display = "block";
-            mensagem.scrollIntoView({ behavior: "smooth", block: "nearest" });
-        }
-
-        function somenteNumeros(valor) {
-            return valor.replace(/\D/g, "");
-        }
-
-        $("cpf").addEventListener("input", function () {
-            let v = somenteNumeros(this.value).slice(0, 11);
-
-            v = v.replace(/(\d{3})(\d)/, "$1.$2");
-            v = v.replace(/(\d{3})(\d)/, "$1.$2");
-            v = v.replace(/(\d{3})(\d{1,2})$/, "$1-$2");
-
-            this.value = v;
-        });
-
-        $("telefone").addEventListener("input", function () {
-            let v = somenteNumeros(this.value).slice(0, 11);
-
-            if (v.length > 10) {
-                v = v.replace(/^(\d{2})(\d{5})(\d{0,4}).*/, "($1) $2-$3");
-            } else if (v.length > 6) {
-                v = v.replace(/^(\d{2})(\d{4})(\d{0,4}).*/, "($1) $2-$3");
-            } else if (v.length > 2) {
-                v = v.replace(/^(\d{2})(\d+)/, "($1) $2");
-            } else if (v.length > 0) {
-                v = v.replace(/^(\d+)/, "($1");
-            }
-
-            this.value = v;
-        });
-
-        $("cep").addEventListener("input", function () {
-            let v = somenteNumeros(this.value).slice(0, 8);
-
-            if (v.length > 5) {
-                v = v.slice(0, 5) + "-" + v.slice(5);
-            }
-
-            this.value = v;
-        });
-
-        document.querySelectorAll(".mostrar").forEach(botao => {
-            botao.addEventListener("click", function () {
-                const campo = $(this.dataset.campo);
-                const mostrar = campo.type === "password";
-
-                campo.type = mostrar ? "text" : "password";
-                this.textContent = mostrar ? "Ocultar" : "Mostrar";
-            });
-        });
-
-        let ultimaConsulta = "";
-
-        $("cep").addEventListener("blur", async function () {
-            const cep = somenteNumeros(this.value);
-
-            if (cep.length !== 8 || cep === ultimaConsulta) return;
-
-            ultimaConsulta = cep;
-            statusCep.textContent = "Buscando endereço...";
-
-            try {
-                const resposta = await fetch(
-                    `https://viacep.com.br/ws/${cep}/json/`
-                );
-
-                if (!resposta.ok) {
-                    throw new Error("Falha na consulta.");
-                }
-
-                const dados = await resposta.json();
-
-                if (dados.erro) {
-                    statusCep.textContent = "CEP não encontrado.";
-                    return;
-                }
-
-                $("endereco").value = dados.logradouro || "";
-                $("bairro").value = dados.bairro || "";
-                $("cidade").value = dados.localidade || "";
-                $("estado").value = dados.uf || "";
-                $("complemento").value = dados.complemento || "";
-
-                statusCep.textContent = "Endereço localizado.";
-            } catch (erro) {
-                statusCep.textContent =
-                    "Não foi possível consultar. Preencha o endereço manualmente.";
-            }
-        });
-
-        form.addEventListener("submit", function (event) {
-            event.preventDefault();
-
-            mensagem.style.display = "none";
-
-            const cpf = somenteNumeros($("cpf").value);
-            const telefone = somenteNumeros($("telefone").value);
-            const cep = somenteNumeros($("cep").value);
-            const senha = $("senha").value;
-            const confirmar = $("confirmarSenha").value;
-
-            if (cpf.length !== 11) {
-                mostrarMensagem("Informe um CPF com 11 dígitos.");
-                $("cpf").focus();
-                return;
-            }
-
-            if (telefone.length < 10 || telefone.length > 11) {
-                mostrarMensagem("Informe um telefone válido com DDD.");
-                $("telefone").focus();
-                return;
-            }
-
-            if (cep.length !== 8) {
-                mostrarMensagem("Informe um CEP válido com 8 dígitos.");
-                $("cep").focus();
-                return;
-            }
-
-            if (senha.length < 8) {
-                mostrarMensagem("A senha precisa ter pelo menos 8 caracteres.");
-                $("senha").focus();
-                return;
-            }
-
-            if (senha !== confirmar) {
-                mostrarMensagem("As senhas não são iguais.");
-                $("confirmarSenha").focus();
-                return;
-            }
-
-            mostrarMensagem(
-                "Os dados foram validados no formulário. Para criar a conta de verdade, precisamos conectar esta página ao backend e ao banco de dados. Nenhuma senha foi armazenada.",
-                true
-            );
-        });
-    </script>
-
-</body>
-</html>
+.mensagem {display:block; padding:12px; margin-bottom:15px; background:#fff0f0; border-radius:8px; color:#a52b2b;}
+.mensagem.sucesso {background:#ecfdf3; color:#187142;}
+</style></head><body>
+<header class="logo"><span class="logo-icone">A</span><div><h1>Auto<span>Peças</span></h1><small>GESTÃO DE ACESSOS</small></div></header>
+<main class="container">
+<div class="cabecalho"><h2>Cadastrar usuário</h2><p>Esta página cria contas de funcionários na tabela USUARIO. Acesso exclusivo para administradores.</p></div>
+<?php if ($erro): ?><div class="mensagem" role="alert"><?= axH($erro) ?></div><?php endif; ?>
+<?php if ($ok): ?><div class="mensagem sucesso" role="status"><?= axH($ok) ?></div><?php endif; ?>
+<form method="post" action="cadastro-cliente.php">
+<input type="hidden" name="csrf" value="<?= axH(axCsrf()) ?>">
+<div class="grade">
+<div class="campo completo"><label for="nome">Nome completo *</label><input type="text" id="nome" name="nome" maxlength="100" required value="<?= axH($_POST['nome'] ?? '') ?>"></div>
+<div class="campo completo"><label for="email">E-mail *</label><input type="email" id="email" name="email" maxlength="100" required value="<?= axH($_POST['email'] ?? '') ?>"></div>
+<div class="campo completo"><label for="tipo">Perfil *</label><select id="tipo" name="tipo" required>
+<?php foreach (['VENDEDOR'=>'Vendedor','GERENTE'=>'Gerente','ADMIN'=>'Administrador'] as $valor=>$rotulo): ?>
+<option value="<?= axH($valor) ?>" <?= ($_POST['tipo'] ?? 'VENDEDOR')===$valor?'selected':'' ?>><?= axH($rotulo) ?></option>
+<?php endforeach; ?></select></div>
+<div class="campo completo"><label for="senha">Senha *</label><input type="password" id="senha" name="senha" minlength="12" maxlength="72" autocomplete="new-password" required><small>No mínimo 12 caracteres.</small></div>
+<div class="campo completo"><label for="confirmar">Confirmar senha *</label><input type="password" id="confirmar" name="confirmar" minlength="12" maxlength="72" autocomplete="new-password" required></div>
+</div><button class="botao" type="submit">Criar usuário</button></form>
+<p class="login-link"><a href="index.php">Voltar ao Dashboard</a></p>
+</main></body></html>

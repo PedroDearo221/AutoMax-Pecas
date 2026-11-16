@@ -2,7 +2,9 @@
 // AutoMax-Peças: cadastro de veículos no Oracle FreeSQL
 // Requer C:\xampp\automax_private\conexao.php (função conexaoOracle).
 declare(strict_types=1);
-session_start();
+require_once __DIR__ . '/automax.php';
+axSession();
+axRequireLogin();
 if (empty($_SESSION['automax_csrf'])) {
     $_SESSION['automax_csrf'] = bin2hex(random_bytes(32));
 }
@@ -87,6 +89,21 @@ try {
     $erro = $e instanceof RuntimeException ? $e->getMessage() : 'Erro ao acessar o Oracle FreeSQL. Consulte o log do servidor.';
 }
 if ($conn) oci_close($conn);
+$veiculoEdicao = null;
+$idEditarVeiculo = filter_var($_GET['editar'] ?? null, FILTER_VALIDATE_INT);
+if ($idEditarVeiculo) {
+    foreach ($veiculos as $candidato) {
+        if ((int)$candidato['ID_VEICULO'] === (int)$idEditarVeiculo) {
+            $veiculoEdicao = $candidato;
+            break;
+        }
+    }
+}
+$buscaVeiculo = mb_substr(trim((string)($_GET['buscar'] ?? '')), 0, 100);
+$veiculosVisiveis = array_values(array_filter($veiculos, static function ($v) use ($buscaVeiculo): bool {
+    if ($buscaVeiculo === '') return true;
+    return mb_stripos(implode(' ', [(string)$v['PLACA'], (string)$v['MARCA'], (string)$v['MODELO'], (string)$v['PROPRIETARIO']]), $buscaVeiculo, 0, 'UTF-8') !== false;
+}));
 $totalVeiculos = count($veiculos);
 $marcasDiferentes = count(array_unique(array_map(fn($v) => mb_strtolower($v['MARCA'], 'UTF-8'), $veiculos)));
 ?>
@@ -97,7 +114,7 @@ $marcasDiferentes = count(array_unique(array_map(fn($v) => mb_strtolower($v['MAR
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Veículos | AutoPeças</title>
     <link rel="stylesheet" href="css/estilo.css">
-    <script src="https://unpkg.com/lucide@latest"></script>
+
 
     <style>
         .menu a {
@@ -166,7 +183,8 @@ $marcasDiferentes = count(array_unique(array_map(fn($v) => mb_strtolower($v['MAR
         tr[hidden] {
             display: none;
         }
-    </style>
+     .icone-sem-js {display:inline-block; min-width:1.05em; font-size:1.1em; font-weight:700; line-height:1; vertical-align:middle;}
+</style>
 </head>
 <body>
 
@@ -182,13 +200,13 @@ $marcasDiferentes = count(array_unique(array_map(fn($v) => mb_strtolower($v['MAR
         <p class="menu-titulo">MENU PRINCIPAL</p>
 
         <nav class="menu">
-            <a href="index.php"><i data-lucide="layout-dashboard"></i>Dashboard</a>
-            <a href="clientes.php"><i data-lucide="users-round"></i>Clientes</a>
-            <a href="veiculos.php" class="ativo"><i data-lucide="car-front"></i>Veículos</a>
-            <a href="produtos.php"><i data-lucide="package"></i>Produtos</a>
-            <a href="estoque.php"><i data-lucide="boxes"></i>Estoque</a>
-            <a href="orcamentos.php"><i data-lucide="file-text"></i>Orçamentos</a>
-            <a href="relatorios.php"><i data-lucide="chart-no-axes-column"></i>Relatórios</a>
+            <a href="index.php"><span class="icone-sem-js" aria-hidden="true">▦</span>Dashboard</a>
+            <a href="clientes.php"><span class="icone-sem-js" aria-hidden="true">♧</span>Clientes</a>
+            <a href="veiculos.php" class="ativo"><span class="icone-sem-js" aria-hidden="true">▱</span>Veículos</a>
+            <a href="produtos.php"><span class="icone-sem-js" aria-hidden="true">▣</span>Produtos</a>
+            <a href="estoque.php"><span class="icone-sem-js" aria-hidden="true">▤</span>Estoque</a>
+            <a href="orcamentos.php"><span class="icone-sem-js" aria-hidden="true">≡</span>Orçamentos</a>
+            <a href="relatorios.php"><span class="icone-sem-js" aria-hidden="true">▥</span>Relatórios</a>
         </nav>
 
         <div class="sidebar-rodape">
@@ -206,7 +224,7 @@ $marcasDiferentes = count(array_unique(array_map(fn($v) => mb_strtolower($v['MAR
             </div>
 
             <a href="#formulario-veiculo" class="botao botao-principal">
-                <i data-lucide="plus"></i>
+                <span class="icone-sem-js" aria-hidden="true">+</span>
                 Novo veículo
             </a>
         </header>
@@ -228,7 +246,7 @@ $marcasDiferentes = count(array_unique(array_map(fn($v) => mb_strtolower($v['MAR
             <article class="card-indicador">
                 <div class="indicador-topo">
                     <span>Total de veículos</span>
-                    <span class="icone-card azul"><i data-lucide="car-front"></i></span>
+                    <span class="icone-card azul"><span class="icone-sem-js" aria-hidden="true">▱</span></span>
                 </div>
                 <h3 id="total-veiculos"><?= $totalVeiculos ?></h3>
                 <p class="texto-secundario">Veículos cadastrados</p>
@@ -237,7 +255,7 @@ $marcasDiferentes = count(array_unique(array_map(fn($v) => mb_strtolower($v['MAR
             <article class="card-indicador">
                 <div class="indicador-topo">
                     <span>Carros</span>
-                    <span class="icone-card roxo"><i data-lucide="car"></i></span>
+                    <span class="icone-card roxo"><span class="icone-sem-js" aria-hidden="true">•</span></span>
                 </div>
                 <h3 id="total-carros">—</h3>
                 <p class="texto-secundario">Tipo ainda não existe no banco</p>
@@ -246,7 +264,7 @@ $marcasDiferentes = count(array_unique(array_map(fn($v) => mb_strtolower($v['MAR
             <article class="card-indicador">
                 <div class="indicador-topo">
                     <span>Motocicletas</span>
-                    <span class="icone-card verde"><i data-lucide="bike"></i></span>
+                    <span class="icone-card verde"><span class="icone-sem-js" aria-hidden="true">•</span></span>
                 </div>
                 <h3 id="total-motos">—</h3>
                 <p class="texto-secundario">Tipo ainda não existe no banco</p>
@@ -255,7 +273,7 @@ $marcasDiferentes = count(array_unique(array_map(fn($v) => mb_strtolower($v['MAR
             <article class="card-indicador">
                 <div class="indicador-topo">
                     <span>Marcas cadastradas</span>
-                    <span class="icone-card laranja"><i data-lucide="settings"></i></span>
+                    <span class="icone-card laranja"><span class="icone-sem-js" aria-hidden="true">•</span></span>
                 </div>
                 <h3 id="total-marcas"><?= $marcasDiferentes ?></h3>
                 <p class="texto-secundario">Marcas diferentes</p>
@@ -263,10 +281,26 @@ $marcasDiferentes = count(array_unique(array_map(fn($v) => mb_strtolower($v['MAR
 
         </section>
 
+        <?php $idConfirmar = filter_var($_GET['excluir'] ?? null, FILTER_VALIDATE_INT); ?>
+        <?php if ($idConfirmar): ?>
+            <?php foreach ($veiculos as $v): if ((int)$v['ID_VEICULO'] !== (int)$idConfirmar) continue; ?>
+            <section class="secao" role="alert">
+                <h2>Confirmar exclusão</h2>
+                <p>Excluir permanentemente o veículo <?= h($v['PLACA']) ?>?</p>
+                <form method="post" action="veiculos.php">
+                    <input type="hidden" name="csrf" value="<?= h($_SESSION['automax_csrf']) ?>">
+                    <input type="hidden" name="acao" value="excluir">
+                    <input type="hidden" name="id_veiculo" value="<?= (int)$v['ID_VEICULO'] ?>">
+                    <button class="botao botao-excluir-veiculo" type="submit">Confirmar exclusão</button>
+                    <a class="botao botao-secundario" href="veiculos.php">Cancelar</a>
+                </form>
+            </section>
+            <?php endforeach; ?>
+        <?php endif; ?>
         <section class="secao" id="formulario-veiculo">
             <div class="secao-cabecalho">
                 <div>
-                    <h2 id="titulo-formulario">Cadastrar veículo</h2>
+                    <h2 id="titulo-formulario"><?= $veiculoEdicao ? 'Editar veículo' : 'Cadastrar veículo' ?></h2>
                     <p>Preencha as informações do veículo e do proprietário.</p>
                 </div>
             </div>
@@ -274,30 +308,30 @@ $marcasDiferentes = count(array_unique(array_map(fn($v) => mb_strtolower($v['MAR
             <form id="form-veiculo" method="post" action="veiculos.php">
                 <input type="hidden" name="csrf" value="<?= h($_SESSION['automax_csrf']) ?>">
                 <input type="hidden" name="acao" value="salvar">
-                <input type="hidden" id="veiculo-editando" name="id_veiculo" value="">
+                <input type="hidden" id="veiculo-editando" name="id_veiculo" value="<?= $veiculoEdicao ? (int)$veiculoEdicao['ID_VEICULO'] : '' ?>">
 
                 <div class="form-grid">
 
                     <div class="campo">
                         <label for="placa">Placa *</label>
                         <input type="text" id="placa" name="placa" maxlength="7"
-                               placeholder="ABC1D23" required>
+                               placeholder="ABC1D23" required value="<?= h($veiculoEdicao['PLACA'] ?? '') ?>">
                     </div>
 
                     <div class="campo">
                         <label for="marca">Marca *</label>
-                        <input type="text" id="marca" name="marca" placeholder="Ex.: Chevrolet" required>
+                        <input type="text" id="marca" name="marca" placeholder="Ex.: Chevrolet" required value="<?= h($veiculoEdicao['MARCA'] ?? '') ?>">
                     </div>
 
                     <div class="campo">
                         <label for="modelo">Modelo *</label>
-                        <input type="text" id="modelo" name="modelo" placeholder="Ex.: Onix" required>
+                        <input type="text" id="modelo" name="modelo" placeholder="Ex.: Onix" required value="<?= h($veiculoEdicao['MODELO'] ?? '') ?>">
                     </div>
 
                     <div class="campo">
                         <label for="ano">Ano de fabricação *</label>
                         <input type="number" id="ano" name="ano" min="1900" max="2099"
-                               placeholder="Ex.: 2022" required>
+                               placeholder="Ex.: 2022" required value="<?= h($veiculoEdicao['ANO'] ?? '') ?>">
                     </div>
 
                     <div class="campo campo-completo">
@@ -305,7 +339,7 @@ $marcasDiferentes = count(array_unique(array_map(fn($v) => mb_strtolower($v['MAR
                         <select id="id_cliente" name="id_cliente" required>
                             <option value="">Selecione um cliente</option>
                             <?php foreach ($clientes as $cliente): ?>
-                                <option value="<?= (int)$cliente['ID_CLIENTE'] ?>"><?= h($cliente['NOME']) ?> — CPF final <?= h(substr((string)$cliente['CPF'], -2)) ?></option>
+                                <option value="<?= (int)$cliente['ID_CLIENTE'] ?>" <?= $veiculoEdicao && (int)$veiculoEdicao['ID_CLIENTE'] === (int)$cliente['ID_CLIENTE'] ? 'selected' : '' ?>><?= h($cliente['NOME']) ?> — CPF final <?= h(substr((string)$cliente['CPF'], -2)) ?></option>
                             <?php endforeach; ?>
                         </select>
                         <?php if (!$clientes): ?><small>Cadastre um cliente na página Clientes antes de incluir um veículo.</small><?php endif; ?>
@@ -314,16 +348,12 @@ $marcasDiferentes = count(array_unique(array_map(fn($v) => mb_strtolower($v['MAR
                 </div>
 
                 <div class="form-acoes">
-                    <button type="button" id="cancelar-veiculo"
-                            class="botao botao-secundario">
-                        <i data-lucide="eraser"></i>
-                        Limpar formulário
-                    </button>
+                    <a href="veiculos.php#formulario-veiculo" class="botao botao-secundario">Limpar formulário</a>
 
                     <button type="submit" id="salvar-veiculo"
                             class="botao botao-principal">
-                        <i data-lucide="plus"></i>
-                        Cadastrar veículo
+                        <span class="icone-sem-js" aria-hidden="true">+</span>
+                        <?= $veiculoEdicao ? 'Salvar alterações' : 'Cadastrar veículo' ?>
                     </button>
                 </div>
             </form>
@@ -337,26 +367,23 @@ $marcasDiferentes = count(array_unique(array_map(fn($v) => mb_strtolower($v['MAR
                 </div>
             </div>
 
-            <div class="filtros">
+            <form class="filtros" method="get" action="veiculos.php">
                 <div class="campo busca">
                     <label for="buscar-veiculo">Buscar veículo</label>
-                    <input type="search" id="buscar-veiculo"
+                    <input type="search" id="buscar-veiculo" name="buscar" value="<?= h($buscaVeiculo) ?>"
                            placeholder="Placa, marca, modelo ou proprietário...">
                 </div>
 
-                <button type="button" id="botao-buscar-veiculo"
+                <button type="submit" id="botao-buscar-veiculo"
                         class="botao botao-principal">
-                    <i data-lucide="search"></i>Buscar
+                    <span class="icone-sem-js" aria-hidden="true">⌕</span>Buscar
                 </button>
 
-                <button type="button" id="limpar-busca-veiculo"
-                        class="botao botao-secundario">
-                    <i data-lucide="x"></i>Limpar
-                </button>
-            </div>
+                <a href="veiculos.php" class="botao botao-secundario">Limpar</a>
+            </form>
 
             <p id="resultado-busca-veiculo" class="resultado-busca"
-               aria-live="polite"></p>
+               aria-live="polite">Exibindo <?= count($veiculosVisiveis) ?> de <?= $totalVeiculos ?> veículo(s).</p>
 
             <div class="tabela-container">
                 <table id="tabela-veiculos">
@@ -365,13 +392,13 @@ $marcasDiferentes = count(array_unique(array_map(fn($v) => mb_strtolower($v['MAR
                             <th>Placa</th>
                             <th>Marca / Modelo</th>
                             <th>Ano</th>
-                            
+
                             <th>Proprietário</th>
                             <th>Ações</th>
                         </tr>
                     </thead>
                     <tbody>
-                    <?php foreach ($veiculos as $v): ?>
+                    <?php foreach ($veiculosVisiveis as $v): ?>
                         <tr data-id="<?= (int)$v['ID_VEICULO'] ?>"
                             data-placa="<?= h($v['PLACA']) ?>"
                             data-marca="<?= h($v['MARCA']) ?>"
@@ -384,8 +411,8 @@ $marcasDiferentes = count(array_unique(array_map(fn($v) => mb_strtolower($v['MAR
                             <td><?= h($v['PROPRIETARIO']) ?></td>
                             <td>
                                 <div class="acoes-veiculo">
-                                    <button type="button" class="botao botao-principal botao-editar-veiculo"><i data-lucide="pencil"></i> Editar</button>
-                                    <button type="button" class="botao botao-excluir-veiculo"><i data-lucide="trash-2"></i> Excluir</button>
+                                    <a class="botao botao-principal" href="veiculos.php?editar=<?= (int)$v['ID_VEICULO'] ?>#formulario-veiculo">Editar</a>
+                                    <a class="botao botao-secundario" href="veiculos.php?excluir=<?= (int)$v['ID_VEICULO'] ?>">Excluir</a>
                                 </div>
                             </td>
                         </tr>
@@ -401,67 +428,7 @@ $marcasDiferentes = count(array_unique(array_map(fn($v) => mb_strtolower($v['MAR
 
     </main>
 
-    <script>
-    const formulario = document.getElementById('form-veiculo');
-    const tabela = document.querySelector('#tabela-veiculos tbody');
-    const inputBusca = document.getElementById('buscar-veiculo');
-    const campoId = document.getElementById('veiculo-editando');
-    const botaoSalvar = document.getElementById('salvar-veiculo');
-    const titulo = document.getElementById('titulo-formulario');
-    const tokenCsrf = <?= json_encode($_SESSION['automax_csrf'], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
-    function limparForm() {
-        formulario.reset();
-        campoId.value = '';
-        titulo.textContent = 'Cadastrar veículo';
-        botaoSalvar.innerHTML = '<i data-lucide="plus"></i> Cadastrar veículo';
-        window.lucide?.createIcons();
-    }
-    document.getElementById('cancelar-veiculo').addEventListener('click', limparForm);
-    document.getElementById('placa').addEventListener('input', function () {
-        this.value = this.value.toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,7);
-    });
-    tabela.addEventListener('click', event => {
-        const editar = event.target.closest('.botao-editar-veiculo');
-        const excluir = event.target.closest('.botao-excluir-veiculo');
-        if (!editar && !excluir) return;
-        const linha = event.target.closest('tr');
-        if (!linha) return;
-        if (editar) {
-            campoId.value = linha.dataset.id;
-            document.getElementById('placa').value = linha.dataset.placa;
-            document.getElementById('marca').value = linha.dataset.marca;
-            document.getElementById('modelo').value = linha.dataset.modelo;
-            document.getElementById('ano').value = linha.dataset.ano;
-            document.getElementById('id_cliente').value = linha.dataset.idCliente;
-            titulo.textContent = 'Editar veículo';
-            botaoSalvar.innerHTML = '<i data-lucide="save"></i> Salvar alterações';
-            window.lucide?.createIcons();
-            document.getElementById('formulario-veiculo').scrollIntoView({behavior:'smooth'});
-        } else if (excluir) {
-            if (!confirm('Excluir permanentemente o veículo ' + linha.dataset.placa + '?')) return;
-            const f = document.createElement('form');
-            f.method = 'post'; f.action = 'veiculos.php';
-            for (const [nome, valor] of Object.entries({acao:'excluir', csrf:tokenCsrf, id_veiculo:linha.dataset.id})) {
-                const campo = document.createElement('input');
-                campo.type = 'hidden'; campo.name = nome; campo.value = valor;
-                f.appendChild(campo);
-            }
-            document.body.appendChild(f); f.submit();
-        }
-    });
-    function buscarVeiculos() {
-        const termo = inputBusca.value.trim().toLocaleLowerCase('pt-BR');
-        const linhas = Array.from(tabela.querySelectorAll('tr'));
-        let encontrados = 0;
-        linhas.forEach(l => { const ok = l.textContent.toLocaleLowerCase('pt-BR').includes(termo); l.hidden = !ok; if (ok) encontrados++; });
-        document.getElementById('resultado-busca-veiculo').textContent = 'Exibindo ' + encontrados + ' de ' + linhas.length + ' veículo(s).';
-    }
-    document.getElementById('botao-buscar-veiculo').addEventListener('click', buscarVeiculos);
-    inputBusca.addEventListener('input', buscarVeiculos);
-    document.getElementById('limpar-busca-veiculo').addEventListener('click', () => {inputBusca.value='';buscarVeiculos();});
-    buscarVeiculos();
-    window.lucide?.createIcons();
-</script>
+
 
 </body>
 </html>
