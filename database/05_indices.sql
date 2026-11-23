@@ -1,0 +1,8 @@
+-- AutoMax-Pecas | Indices adicionais da migracao original
+-- Executar apos 01_tabelas.sql em um schema novo.
+-- PK e UNIQUE criam seus proprios indices automaticamente no Oracle.
+
+CREATE INDEX IX_AUTOMAX_ORC_USUARIO ON ORCAMENTO (ID_USUARIO);
+CREATE INDEX IX_AUTOMAX_ORC_DATA ON ORCAMENTO (DATA_ORCAMENTO);
+CREATE INDEX IX_AUTOMAX_ITEM_ORC ON ITEM_ORCAMENTO (ID_ORCAMENTO);
+CREATE INDEX IX_AUTOMAX_ITEM_PROD ON ITEM_ORCAMENTO (ID_PRODUTO);
