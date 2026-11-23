@@ -55,19 +55,9 @@ RUN mkdir -p /var/automax_private \
 
 RUN chown -R www-data:www-data /var/www/html
 
-RUN a2enmod auth_basic authn_file headers
+RUN a2enmod headers
 
 RUN printf 'display_errors=Off\nlog_errors=On\nsession.cookie_httponly=1\n' > /usr/local/etc/php/conf.d/automax.ini
-
-RUN printf '%s\n' \
-    '<Directory /var/www/html>' \
-    '    AuthType Basic' \
-    '    AuthName "AutoMax-Pecas - Acesso Restrito"' \
-    '    AuthUserFile /etc/apache2/.htpasswd' \
-    '    Require valid-user' \
-    '</Directory>' \
-    > /etc/apache2/conf-available/automax-auth.conf \
-    && a2enconf automax-auth
 
 COPY docker/start.sh /usr/local/bin/automax-start.sh
 
